@@ -6,3 +6,8 @@ coverage/
 *.log
 .env*
 !.env.example
+*.db
+coldread.db
+uploads/
+.env
+.env.local
