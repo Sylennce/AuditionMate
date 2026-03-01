@@ -1,0 +1,8 @@
+{
+  "name": "Audition Mate",
+  "description": "A professional teleprompter and cue-based reader app for actors. Rehearse with an AI reader that listens for your cues.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
