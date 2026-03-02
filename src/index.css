@@ -9,3 +9,18 @@
     scrollbar-width: none;
   }
 }
+
+/* -------------------------------- */
+/* Mobile Safe Area Spacing Fix     */
+/* -------------------------------- */
+
+#root {
+  min-height: 100dvh;
+  box-sizing: border-box;
+
+  /* ✅ Match app background */
+  background-color: #0b0f14; /* use your app's actual bg colour */
+
+  padding-top: calc(env(safe-area-inset-top) + 24px);
+  padding-bottom: calc(env(safe-area-inset-bottom) + 8px);
+}
