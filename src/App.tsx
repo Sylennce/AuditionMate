@@ -415,7 +415,7 @@ function SceneDetailView({ scene, lines, onBack, onRecord, onRehearse, onSelfTap
       initial={{ opacity: 0, x: 20 }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: -20 }}
-      className="max-w-md mx-auto h-full flex flex-col overflow-hidden"
+      className="w-full max-w-none md:max-w-md mx-auto h-full flex flex-col overflow-hidden"
     >
       <header className="p-6 border-b border-zinc-800 flex items-center gap-4 sticky top-0 bg-[#151619] z-10">
         <button onClick={onBack} className="p-2 -ml-2 text-zinc-400"><ArrowLeft size={24} /></button>
@@ -641,7 +641,7 @@ function RecordView({ scene, onBack, lineCount, addToast }: { scene: Scene, onBa
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -20 }}
-      className="max-w-md mx-auto h-full flex flex-col overflow-hidden p-6"
+      className="w-full max-w-none md:max-w-md mx-auto h-full flex flex-col overflow-hidden p-6"
     >
       <header className="flex items-center justify-between mb-12">
         <button onClick={onBack} className="text-zinc-500"><ArrowLeft size={24} /></button>
@@ -650,7 +650,7 @@ function RecordView({ scene, onBack, lineCount, addToast }: { scene: Scene, onBa
       </header>
 
       <div className="flex-1 flex flex-col items-center justify-center gap-8">
-        <div className="flex bg-zinc-900 p-1 rounded-xl w-full max-w-[240px]">
+        <div className="flex bg-zinc-900 p-1 rounded-xl w-full max-w-[320px]">
           <button 
             onClick={() => setRole('MYSELF')}
             className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${role === 'MYSELF' ? 'bg-emerald-600 text-white shadow-lg' : 'text-zinc-500'}`}
@@ -683,7 +683,7 @@ function RecordView({ scene, onBack, lineCount, addToast }: { scene: Scene, onBa
           )}
         </div>
 
-        <div className="w-full space-y-4">
+        <div className="w-full space-y-4 mt-10">
           <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-4 min-h-[120px]">
             <label className="text-[10px] uppercase tracking-widest font-bold text-zinc-600 mb-2 block">Transcription</label>
             {isTranscribing ? (
@@ -927,6 +927,7 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
   const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
   const isSpeechSupported = !!SpeechRecognition;
   const consecutiveMatchesRef = useRef(0);
+	const lastTriggerAtRef = useRef(0);
 
   useEffect(() => {
     linesRef.current = lines;
@@ -1028,6 +1029,8 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
     recognitionRef.current = recognition;
     recognition.continuous = true;
     recognition.interimResults = true;
+recognition.lang = "en-US";
+recognition.maxAlternatives = 3;
 
     recognition.onresult = (event: any) => {
       if (!isPlayingRef.current) return;
@@ -1044,26 +1047,28 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
         }
       }
 
-      const tokens = currentSpoken.split(" ");
-      const lastToken = tokens[tokens.length - 1];
       const cue = normalize(linesRef.current[index].cueWord || "");
+const spoken = currentSpoken;
 
-      if (cue !== "" && lastToken === cue) {
-        if (isFinalResult) {
-          consecutiveMatchesRef.current = 2; // Immediate trigger for final results
-        } else {
-          consecutiveMatchesRef.current += 1;
-        }
-      } else {
-        consecutiveMatchesRef.current = 0;
-      }
+if (cue) {
+  const escapedCue = cue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const cueEndRe = new RegExp(`\\b${escapedCue}\\b$`);
 
-      if (!hasTriggeredRef.current && consecutiveMatchesRef.current >= 2) {
-        hasTriggeredRef.current = true;
-        recognition.onend = null;
-        recognition.stop();
-        stepTo(index + 1);
-      }
+  if (cueEndRe.test(spoken)) {
+    const now = Date.now();
+
+    // prevents double trigger from interim updates
+    if (!hasTriggeredRef.current && now - lastTriggerAtRef.current > 650) {
+      hasTriggeredRef.current = true;
+      lastTriggerAtRef.current = now;
+
+      recognition.onend = null;
+      recognition.stop();
+
+      stepTo(index + 1);
+    }
+  }
+}
     };
 
     recognition.onend = () => {
@@ -1078,7 +1083,7 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
               recognition.start();
             } catch (e) {}
           }
-        }, 200);
+        }, 80);
       }
     };
 
@@ -1357,6 +1362,10 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
   const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
   const isSpeechSupported = !!SpeechRecognition;
   const consecutiveMatchesRef = useRef(0);
+const lastTriggerAtRef = useRef(0);
+
+const [tapeBlob, setTapeBlob] = useState<Blob | null>(null);
+const [tapeUrl, setTapeUrl] = useState<string | null>(null);
 
   useEffect(() => {
     linesRef.current = lines;
@@ -1391,6 +1400,32 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
       stopEverything();
     };
   }, []);
+
+const saveToPhotosOrDownload = async () => {
+  if (!tapeBlob) return;
+
+  const safeName = scene.title.replace(/[^\w\-]+/g, '_');
+  const file = new File([tapeBlob], `SelfTape-${safeName}.mp4`, { type: 'video/mp4' });
+
+  // Best case: native share sheet (iOS/Android)
+  // Note: requires user tap (this function should be called by a button click)
+  const navAny = navigator as any;
+  if (navAny.share && navAny.canShare?.({ files: [file] })) {
+    await navAny.share({
+      files: [file],
+      title: `SelfTape - ${scene.title}`,
+      text: 'Save to Photos / Files',
+    });
+    return;
+  }
+
+  // Fallback: download
+  const url = tapeUrl || URL.createObjectURL(tapeBlob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = file.name;
+  a.click();
+};
 
   const normalize = (text: string) => {
     return text
@@ -1468,6 +1503,8 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
     recognitionRef.current = recognition;
     recognition.continuous = true;
     recognition.interimResults = true;
+recognition.lang = "en-US";
+recognition.maxAlternatives = 3;
 
     recognition.onresult = (event: any) => {
       if (!isPlayingRef.current) return;
@@ -1484,26 +1521,28 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
         }
       }
 
-      const tokens = currentSpoken.split(" ");
-      const lastToken = tokens[tokens.length - 1];
       const cue = normalize(linesRef.current[index].cueWord || "");
+const spoken = currentSpoken;
 
-      if (cue !== "" && lastToken === cue) {
-        if (isFinalResult) {
-          consecutiveMatchesRef.current = 2; // Immediate trigger for final results
-        } else {
-          consecutiveMatchesRef.current += 1;
-        }
-      } else {
-        consecutiveMatchesRef.current = 0;
-      }
+if (cue) {
+  const escapedCue = cue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const cueEndRe = new RegExp(`\\b${escapedCue}\\b$`);
 
-      if (!hasTriggeredRef.current && consecutiveMatchesRef.current >= 2) {
-        hasTriggeredRef.current = true;
-        recognition.onend = null;
-        recognition.stop();
-        stepTo(index + 1);
-      }
+  if (cueEndRe.test(spoken)) {
+    const now = Date.now();
+
+    // prevents double trigger from interim updates
+    if (!hasTriggeredRef.current && now - lastTriggerAtRef.current > 650) {
+      hasTriggeredRef.current = true;
+      lastTriggerAtRef.current = now;
+
+      recognition.onend = null;
+      recognition.stop();
+
+      stepTo(index + 1);
+    }
+  }
+}
     };
 
     recognition.onend = () => {
@@ -1518,7 +1557,7 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
               recognition.start();
             } catch (e) {}
           }
-        }, 200);
+        }, 80);
       }
     };
 
@@ -1549,13 +1588,11 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
     videoChunks.current = [];
     mediaRecorder.current.ondataavailable = (e) => videoChunks.current.push(e.data);
     mediaRecorder.current.onstop = () => {
-      const blob = new Blob(videoChunks.current, { type: 'video/mp4' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `SelfTape-${scene.title}.mp4`;
-      a.click();
-    };
+  const blob = new Blob(videoChunks.current, { type: 'video/mp4' });
+  const url = URL.createObjectURL(blob);
+  setTapeBlob(blob);
+  setTapeUrl(url);
+};
     mediaRecorder.current.start();
     setIsRecording(true);
   };
@@ -1624,12 +1661,23 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
             <div className="w-8 h-8 bg-white rounded-full" />
           </button>
         ) : (
-          <button
-            onClick={stopTape}
-            className="w-20 h-20 rounded-full bg-red-700 flex items-center justify-center shadow-xl active:scale-95 transition"
-          >
-            <div className="w-6 h-6 bg-white" />
-          </button>
+          <>
+  <button
+    onClick={stopTape}
+    className="w-20 h-20 rounded-full bg-red-700 flex items-center justify-center shadow-xl active:scale-95 transition"
+  >
+    <div className="w-6 h-6 bg-white" />
+  </button>
+
+  {tapeBlob && (
+    <button
+      onClick={saveToPhotosOrDownload}
+      className="mt-3 w-56 py-3 rounded-2xl bg-emerald-600 text-white font-bold uppercase tracking-widest text-xs"
+    >
+      Save to Photos / Share
+    </button>
+  )}
+</>
         )}
       </div>
 
