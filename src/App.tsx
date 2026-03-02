@@ -328,7 +328,7 @@ function HomeView({ scenes, onOpen, onCreate, onDelete, loading, error, onRetry 
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -20 }}
-      className="max-w-md mx-auto p-6"
+      className="w-full max-w-none md:max-w-md mx-auto p-6"
     >
       <header className="flex justify-between items-center mb-8">
         <div>
@@ -430,7 +430,7 @@ function SceneDetailView({ scene, lines, onBack, onRecord, onRehearse, onSelfTap
         </button>
       </header>
 
-      <div className="flex-1 p-4 space-y-3 overflow-y-auto">
+      <div className="flex-1 p-4 space-y-3 overflow-y-auto overscroll-contain">
         {lines.length === 0 ? (
           <div className="text-center py-20 text-zinc-600">
             <Mic size={48} className="mx-auto mb-4 opacity-20" />
@@ -1152,7 +1152,7 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 bg-[#050505] flex flex-col"
+      className="h-full w-full bg-[#050505] flex flex-col overflow-hidden"
     >
       <audio ref={audioRef} />
       
@@ -1571,7 +1571,7 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 bg-black flex flex-col"
+      className="h-full w-full bg-black flex flex-col overflow-hidden"
     >
       <audio ref={audioRef} />
       <video 
