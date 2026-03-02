@@ -21,6 +21,6 @@
   /* ✅ Match app background */
   background-color: #0b0f14; /* use your app's actual bg colour */
 
-  padding-top: calc(env(safe-area-inset-top) + 72px);
+  padding-top: calc(env(safe-area-inset-top) + 36px);
   padding-bottom: calc(env(safe-area-inset-bottom) + 8px);
 }
