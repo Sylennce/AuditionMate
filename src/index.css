@@ -1,26 +1,29 @@
 @import "tailwindcss";
 
 @layer utilities {
-  .scrollbar-hide::-webkit-scrollbar {
-    display: none;
-  }
-  .scrollbar-hide {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
+  .scrollbar-hide::-webkit-scrollbar { display: none; }
+  .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+}
+
+/* -------------------------------- */
+/* Global: prevent whole-page scroll */
+/* -------------------------------- */
+html, body {
+  height: 100%;
+  overflow: hidden;          /* ✅ stops the browser page from scrolling */
+  background-color: #0b0f14; /* avoids white flash/bands */
 }
 
 /* -------------------------------- */
 /* Mobile Safe Area Spacing Fix     */
 /* -------------------------------- */
-
 #root {
-  min-height: 100dvh;
+  height: 100dvh;            /* ✅ fixed viewport height */
+  overflow: hidden;          /* ✅ root itself never scrolls */
   box-sizing: border-box;
 
-  /* ✅ Match app background */
-  background-color: #0b0f14; /* use your app's actual bg colour */
+  background-color: #0b0f14;
 
-  padding-top: calc(env(safe-area-inset-top) + 36px);
+  padding-top: calc(env(safe-area-inset-top) + 24px);   /* increase as you like */
   padding-bottom: calc(env(safe-area-inset-bottom) + 8px);
 }

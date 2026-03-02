@@ -196,7 +196,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#151619] text-white font-sans selection:bg-emerald-500/30">
+    <div className="h-full overflow-hidden bg-[#151619] text-white font-sans selection:bg-emerald-500/30 flex flex-col">
       <AnimatePresence mode="wait">
         {view === 'HOME' && (
           <HomeView 
@@ -415,7 +415,7 @@ function SceneDetailView({ scene, lines, onBack, onRecord, onRehearse, onSelfTap
       initial={{ opacity: 0, x: 20 }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: -20 }}
-      className="max-w-md mx-auto min-h-screen flex flex-col"
+      className="max-w-md mx-auto h-full flex flex-col overflow-hidden"
     >
       <header className="p-6 border-b border-zinc-800 flex items-center gap-4 sticky top-0 bg-[#151619] z-10">
         <button onClick={onBack} className="p-2 -ml-2 text-zinc-400"><ArrowLeft size={24} /></button>
@@ -641,7 +641,7 @@ function RecordView({ scene, onBack, lineCount, addToast }: { scene: Scene, onBa
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -20 }}
-      className="max-w-md mx-auto min-h-screen flex flex-col p-6"
+      className="max-w-md mx-auto h-full flex flex-col overflow-hidden p-6"
     >
       <header className="flex items-center justify-between mb-12">
         <button onClick={onBack} className="text-zinc-500"><ArrowLeft size={24} /></button>
