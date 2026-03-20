@@ -928,6 +928,7 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
   const isSpeechSupported = !!SpeechRecognition;
   const consecutiveMatchesRef = useRef(0);
 	const lastTriggerAtRef = useRef(0);
+  const audioUnlockedRef = useRef(false);
 
   useEffect(() => {
     linesRef.current = lines;
@@ -951,6 +952,18 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
       .replace(/[^\w\s']|_/g, " ")
       .replace(/\s+/g, " ")
       .trim();
+  };
+
+  // iOS requires audio to be "unlocked" via a user-gesture before autoplay works.
+  // We play a silent buffer immediately on the first play tap so subsequent
+  // programmatic plays are permitted even after the countdown delay.
+  const unlockAudio = () => {
+    if (audioUnlockedRef.current || !audioRef.current) return;
+    audioUnlockedRef.current = true;
+    const audio = audioRef.current;
+    audio.src =
+      'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+    audio.play().then(() => { audio.pause(); audio.src = ''; }).catch(() => {});
   };
 
   const stopEverything = () => {
@@ -1001,14 +1014,28 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
     }
 
     const line = linesRef.current[index];
-    if (line.audioPath && audioRef.current) {
-      audioRef.current.src = line.audioPath;
-      audioRef.current.onended = () => {
-        if (currentIndexRef.current !== index) return;
-        stepTo(index + 1);
-      };
-      audioRef.current.play().catch(console.error);
+
+    // If there's no audio for this reader line, skip forward after a short pause
+    if (!line.audioPath || !audioRef.current) {
+      setTimeout(() => {
+        if (currentIndexRef.current === index && isPlayingRef.current) {
+          stepTo(index + 1);
+        }
+      }, 600);
+      return;
     }
+
+    audioRef.current.src = line.audioPath;
+    audioRef.current.onended = () => {
+      if (currentIndexRef.current !== index) return;
+      stepTo(index + 1);
+    };
+    audioRef.current.play().catch(() => {
+      // Autoplay blocked (can happen on iOS if unlock didn't work) — skip forward
+      if (currentIndexRef.current === index && isPlayingRef.current) {
+        setTimeout(() => stepTo(index + 1), 600);
+      }
+    });
   };
 
   const startListening = (index: number) => {
@@ -1029,61 +1056,60 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
     recognitionRef.current = recognition;
     recognition.continuous = true;
     recognition.interimResults = true;
-recognition.lang = "en-US";
-recognition.maxAlternatives = 3;
+    recognition.lang = "en-US";
+    recognition.maxAlternatives = 3;
 
     recognition.onresult = (event: any) => {
       if (!isPlayingRef.current) return;
       if (currentIndexRef.current !== index) return;
 
-      let currentSpoken = "";
-      let isFinalResult = false;
-
+      // Accumulate: finals are committed, latest interim is appended
+      let latestTranscript = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {
-        currentSpoken = normalize(event.results[i][0].transcript);
+        const t = normalize(event.results[i][0].transcript);
         if (event.results[i].isFinal) {
-          spokenFinalRef.current = currentSpoken;
-          isFinalResult = true;
+          spokenFinalRef.current = (spokenFinalRef.current + " " + t).trim();
         }
+        latestTranscript = t; // keep the most recent segment for cue checking
       }
 
       const cue = normalize(linesRef.current[index].cueWord || "");
-const spoken = currentSpoken;
 
-if (cue) {
-  const escapedCue = cue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const cueEndRe = new RegExp(`\\b${escapedCue}\\b$`);
+      if (cue) {
+        // Build the text to search: committed finals + latest segment
+        const fullSpoken = (spokenFinalRef.current + " " + latestTranscript).trim();
+        // Check the last 6 words — more lenient than exact end-match so that
+        // trailing noise words don't prevent the cue from being found
+        const lastWords = fullSpoken.split(/\s+/).slice(-6).join(" ");
+        const escapedCue = cue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const cueRe = new RegExp(`\\b${escapedCue}\\b`);
 
-  if (cueEndRe.test(spoken)) {
-    const now = Date.now();
-
-    // prevents double trigger from interim updates
-    if (!hasTriggeredRef.current && now - lastTriggerAtRef.current > 650) {
-      hasTriggeredRef.current = true;
-      lastTriggerAtRef.current = now;
-
-      recognition.onend = null;
-      recognition.stop();
-
-      stepTo(index + 1);
-    }
-  }
-}
+        if (cueRe.test(lastWords)) {
+          const now = Date.now();
+          if (!hasTriggeredRef.current && now - lastTriggerAtRef.current > 650) {
+            hasTriggeredRef.current = true;
+            lastTriggerAtRef.current = now;
+            recognition.onend = null;
+            recognition.stop();
+            stepTo(index + 1);
+          }
+        }
+      }
     };
 
     recognition.onend = () => {
-      if (isPlayingRef.current && 
-          linesRef.current[currentIndexRef.current]?.speakerRole === 'MYSELF' && 
+      if (isPlayingRef.current &&
+          linesRef.current[currentIndexRef.current]?.speakerRole === 'MYSELF' &&
           !hasTriggeredRef.current) {
         setTimeout(() => {
-          if (isPlayingRef.current && 
-              linesRef.current[currentIndexRef.current]?.speakerRole === 'MYSELF' && 
+          if (isPlayingRef.current &&
+              linesRef.current[currentIndexRef.current]?.speakerRole === 'MYSELF' &&
               !hasTriggeredRef.current) {
             try {
               recognition.start();
             } catch (e) {}
           }
-        }, 80);
+        }, 200);
       }
     };
 
@@ -1093,6 +1119,7 @@ if (cue) {
   };
 
   const togglePlay = () => {
+    unlockAudio();
     if (isPlaying || isCountingDown) {
       stopEverything();
     } else {
@@ -1190,13 +1217,30 @@ if (cue) {
           scrollDelaySec={scrollDelaySec}
         />
 
-        <div className={`absolute ${isLandscape ? 'bottom-8' : 'bottom-16'} left-0 right-0 px-8 flex justify-center gap-4`}>
-          <button 
+        <div className={`absolute ${isLandscape ? 'bottom-8' : 'bottom-16'} left-0 right-0 px-8 flex justify-center gap-6 items-center`}>
+          <button
             onClick={togglePlay}
             className="w-24 h-24 rounded-full bg-emerald-600 flex items-center justify-center shadow-2xl shadow-emerald-500/20 active:scale-95 transition-transform"
           >
             {isPlaying ? <Pause size={40} /> : <Play size={40} />}
           </button>
+          {isPlaying && (
+            <button
+              onClick={() => {
+                if (recognitionRef.current) {
+                  recognitionRef.current.onend = null;
+                  recognitionRef.current.stop();
+                }
+                audioRef.current?.pause();
+                hasTriggeredRef.current = true;
+                stepTo(currentIndex + 1);
+              }}
+              className="w-16 h-16 rounded-full bg-zinc-700 flex items-center justify-center active:scale-95 transition-transform"
+              title="Skip to next line"
+            >
+              <ChevronRight size={28} />
+            </button>
+          )}
         </div>
 
         <AnimatePresence>
@@ -1362,7 +1406,8 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
   const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
   const isSpeechSupported = !!SpeechRecognition;
   const consecutiveMatchesRef = useRef(0);
-const lastTriggerAtRef = useRef(0);
+  const lastTriggerAtRef = useRef(0);
+  const audioUnlockedRef = useRef(false);
 
 const [tapeBlob, setTapeBlob] = useState<Blob | null>(null);
 const [tapeUrl, setTapeUrl] = useState<string | null>(null);
@@ -1469,6 +1514,15 @@ const saveToPhotosOrDownload = async () => {
     }
   };
 
+  const unlockAudio = () => {
+    if (audioUnlockedRef.current || !audioRef.current) return;
+    audioUnlockedRef.current = true;
+    const audio = audioRef.current;
+    audio.src =
+      'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+    audio.play().then(() => { audio.pause(); audio.src = ''; }).catch(() => {});
+  };
+
   const playReader = (index: number) => {
     if (recognitionRef.current) {
       recognitionRef.current.onend = null;
@@ -1476,14 +1530,26 @@ const saveToPhotosOrDownload = async () => {
     }
 
     const line = linesRef.current[index];
-    if (line.audioPath && audioRef.current) {
-      audioRef.current.src = line.audioPath;
-      audioRef.current.onended = () => {
-        if (currentIndexRef.current !== index) return;
-        stepTo(index + 1);
-      };
-      audioRef.current.play().catch(console.error);
+
+    if (!line.audioPath || !audioRef.current) {
+      setTimeout(() => {
+        if (currentIndexRef.current === index && isPlayingRef.current) {
+          stepTo(index + 1);
+        }
+      }, 600);
+      return;
     }
+
+    audioRef.current.src = line.audioPath;
+    audioRef.current.onended = () => {
+      if (currentIndexRef.current !== index) return;
+      stepTo(index + 1);
+    };
+    audioRef.current.play().catch(() => {
+      if (currentIndexRef.current === index && isPlayingRef.current) {
+        setTimeout(() => stepTo(index + 1), 600);
+      }
+    });
   };
 
   const startListening = (index: number) => {
@@ -1503,61 +1569,56 @@ const saveToPhotosOrDownload = async () => {
     recognitionRef.current = recognition;
     recognition.continuous = true;
     recognition.interimResults = true;
-recognition.lang = "en-US";
-recognition.maxAlternatives = 3;
+    recognition.lang = "en-US";
+    recognition.maxAlternatives = 3;
 
     recognition.onresult = (event: any) => {
       if (!isPlayingRef.current) return;
       if (currentIndexRef.current !== index) return;
 
-      let currentSpoken = "";
-      let isFinalResult = false;
-
+      let latestTranscript = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {
-        currentSpoken = normalize(event.results[i][0].transcript);
+        const t = normalize(event.results[i][0].transcript);
         if (event.results[i].isFinal) {
-          spokenFinalRef.current = currentSpoken;
-          isFinalResult = true;
+          spokenFinalRef.current = (spokenFinalRef.current + " " + t).trim();
         }
+        latestTranscript = t;
       }
 
       const cue = normalize(linesRef.current[index].cueWord || "");
-const spoken = currentSpoken;
 
-if (cue) {
-  const escapedCue = cue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const cueEndRe = new RegExp(`\\b${escapedCue}\\b$`);
+      if (cue) {
+        const fullSpoken = (spokenFinalRef.current + " " + latestTranscript).trim();
+        const lastWords = fullSpoken.split(/\s+/).slice(-6).join(" ");
+        const escapedCue = cue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const cueRe = new RegExp(`\\b${escapedCue}\\b`);
 
-  if (cueEndRe.test(spoken)) {
-    const now = Date.now();
-
-    // prevents double trigger from interim updates
-    if (!hasTriggeredRef.current && now - lastTriggerAtRef.current > 650) {
-      hasTriggeredRef.current = true;
-      lastTriggerAtRef.current = now;
-
-      recognition.onend = null;
-      recognition.stop();
-
-      stepTo(index + 1);
-    }
-  }
-}
+        if (cueRe.test(lastWords)) {
+          const now = Date.now();
+          if (!hasTriggeredRef.current && now - lastTriggerAtRef.current > 650) {
+            hasTriggeredRef.current = true;
+            lastTriggerAtRef.current = now;
+            recognition.onend = null;
+            recognition.stop();
+            stepTo(index + 1);
+          }
+        }
+      }
     };
 
     recognition.onend = () => {
-      if (isPlayingRef.current && 
-          linesRef.current[currentIndexRef.current]?.speakerRole === 'MYSELF' && 
+      if (isPlayingRef.current &&
+          linesRef.current[currentIndexRef.current]?.speakerRole === 'MYSELF' &&
           !hasTriggeredRef.current) {
         setTimeout(() => {
-          if (isPlayingRef.current && 
-              linesRef.current[currentIndexRef.current]?.speakerRole === 'MYSELF' && 
+          if (isPlayingRef.current &&
+              linesRef.current[currentIndexRef.current]?.speakerRole === 'MYSELF' &&
               !hasTriggeredRef.current) {
             try {
               recognition.start();
             } catch (e) {}
           }
-        }, 80);
+        }, 200);
       }
     };
 
@@ -1567,6 +1628,7 @@ if (cue) {
   };
 
   const startTape = () => {
+    unlockAudio();
     let count = 3;
     setCountdown(count);
     const timer = setInterval(() => {
