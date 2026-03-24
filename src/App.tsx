@@ -913,7 +913,7 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
   const [isCountingDown, setIsCountingDown] = useState(false);
   
   const audioCtxRef = useRef<any>(null);
-  const currentSourceRef = useRef<any>(null);
+  const readerAudioRef = useRef<HTMLAudioElement>(new Audio());
   const playSessionRef = useRef(0);
   const recognitionRef = useRef<any>(null);
   const countdownTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -955,15 +955,24 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
       .trim();
   };
 
-  // iOS requires AudioContext to be resumed within a user-gesture.
-  // Creating and resuming it on the first play tap unlocks audio for the
-  // entire session — subsequent programmatic plays work regardless of timing.
+  // iOS requires audio to be unlocked within a user-gesture.
+  // Play a silent buffer via AudioContext AND prime the <audio> element so
+  // subsequent programmatic plays work regardless of timing.
   const unlockAudio = () => {
-    if (audioCtxRef.current) return;
-    const AudioContext = (window as any).AudioContext || (window as any).webkitAudioContext;
-    if (!AudioContext) return;
-    audioCtxRef.current = new AudioContext();
-    audioCtxRef.current.resume().catch(() => {});
+    if (!audioCtxRef.current) {
+      const AudioContext = (window as any).AudioContext || (window as any).webkitAudioContext;
+      if (AudioContext) {
+        audioCtxRef.current = new AudioContext();
+        audioCtxRef.current.resume().catch(() => {});
+      }
+    }
+    // Prime the <audio> element so iOS allows future programmatic play() calls
+    const audio = readerAudioRef.current;
+    if (!audio.dataset.unlocked) {
+      audio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+      audio.play().catch(() => {}).finally(() => { audio.src = ''; });
+      audio.dataset.unlocked = '1';
+    }
   };
 
   const stopEverything = () => {
@@ -975,11 +984,9 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
       clearInterval(countdownTimerRef.current);
       countdownTimerRef.current = null;
     }
-    if (currentSourceRef.current) {
-      currentSourceRef.current.onended = null;
-      try { currentSourceRef.current.stop(); } catch (e) {}
-      currentSourceRef.current = null;
-    }
+    const audio = readerAudioRef.current;
+    audio.onended = null;
+    audio.pause();
     if (recognitionRef.current) {
       recognitionRef.current.onend = null;
       recognitionRef.current.stop();
@@ -1017,18 +1024,16 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
       recognitionRef.current.stop();
     }
 
-    // Cancel any in-flight audio
-    if (currentSourceRef.current) {
-      currentSourceRef.current.onended = null;
-      try { currentSourceRef.current.stop(); } catch (e) {}
-      currentSourceRef.current = null;
-    }
-
     const session = ++playSessionRef.current;
     const line = linesRef.current[index];
 
-    // If there's no audio for this reader line, skip forward after a short pause
-    if (!line.audioPath || !audioCtxRef.current) {
+    // Stop any in-flight audio
+    const audio = readerAudioRef.current;
+    audio.onended = null;
+    audio.pause();
+
+    // If no audio recorded for this line, skip forward after a short pause
+    if (!line.audioPath) {
       setTimeout(() => {
         if (currentIndexRef.current === index && isPlayingRef.current) {
           stepTo(index + 1);
@@ -1037,31 +1042,19 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
       return;
     }
 
-    const ctx = audioCtxRef.current;
-    fetch(line.audioPath)
-      .then(r => r.arrayBuffer())
-      .then(ab => {
-        if (playSessionRef.current !== session) return null;
-        return ctx.decodeAudioData(ab);
-      })
-      .then(audioBuffer => {
-        if (!audioBuffer || playSessionRef.current !== session || !isPlayingRef.current) return;
-        const source = ctx.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(ctx.destination);
-        currentSourceRef.current = source;
-        source.onended = () => {
-          if (currentIndexRef.current === index && isPlayingRef.current) {
-            stepTo(index + 1);
-          }
-        };
-        source.start();
-      })
-      .catch(() => {
-        if (currentIndexRef.current === index && isPlayingRef.current) {
-          setTimeout(() => stepTo(index + 1), 600);
-        }
-      });
+    // Use <audio> element — correctly routes to speaker on iOS regardless of
+    // whether speech recognition has put the session into voice-processing mode.
+    audio.src = line.audioPath;
+    audio.onended = () => {
+      if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
+        stepTo(index + 1);
+      }
+    };
+    audio.play().catch(() => {
+      if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
+        setTimeout(() => stepTo(index + 1), 600);
+      }
+    });
   };
 
   const startListening = (index: number) => {
@@ -1087,34 +1080,37 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
       if (!isPlayingRef.current) return;
       if (currentIndexRef.current !== index) return;
 
-      // Accumulate finals; track latest interim separately to avoid doubling
+      const lineData = linesRef.current[index];
+      const cue = normalize(lineData.cueWord || "") ||
+                  normalize(lineData.text || "").split(/\s+/).filter(Boolean).slice(-1)[0] || "";
+      if (!cue) return;
+
+      // Accumulate finals (top alternative); track latest interim from all alternatives
       let latestInterim = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {
-        const t = normalize(event.results[i][0].transcript);
-        if (event.results[i].isFinal) {
+        const result = event.results[i];
+        if (result.isFinal) {
+          const t = normalize(result[0].transcript);
           spokenFinalRef.current = (spokenFinalRef.current + " " + t).trim();
         } else {
-          latestInterim = t;
+          // Collect interim text from all alternatives — cue may appear in a lower-ranked one
+          for (let alt = 0; alt < result.length; alt++) {
+            latestInterim += " " + normalize(result[alt].transcript);
+          }
+          latestInterim = latestInterim.trim();
         }
       }
 
-      const lineData = linesRef.current[index];
-      // Fall back to last word of line text if cueWord was not captured during recording
-      const cue = normalize(lineData.cueWord || "") ||
-                  normalize(lineData.text || "").split(/\s+/).filter(Boolean).slice(-1)[0] || "";
-
-      if (cue) {
-        const fullSpoken = (spokenFinalRef.current + " " + latestInterim).trim();
-        const lastWordsList = fullSpoken.split(/\s+/).filter(Boolean).slice(-8);
-        if (lastWordsList.includes(cue)) {
-          const now = Date.now();
-          if (!hasTriggeredRef.current && now - lastTriggerAtRef.current > 650) {
-            hasTriggeredRef.current = true;
-            lastTriggerAtRef.current = now;
-            recognition.onend = null;
-            recognition.stop();
-            stepTo(index + 1);
-          }
+      const fullSpoken = (spokenFinalRef.current + " " + latestInterim).trim();
+      const lastWordsList = fullSpoken.split(/\s+/).filter(Boolean).slice(-12);
+      if (lastWordsList.includes(cue)) {
+        const now = Date.now();
+        if (!hasTriggeredRef.current && now - lastTriggerAtRef.current > 650) {
+          hasTriggeredRef.current = true;
+          lastTriggerAtRef.current = now;
+          recognition.onend = null;
+          recognition.stop();
+          stepTo(index + 1);
         }
       }
     };
@@ -1399,7 +1395,7 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
   const videoChunks = useRef<Blob[]>([]);
 
   const audioCtxRef = useRef<any>(null);
-  const currentSourceRef = useRef<any>(null);
+  const readerAudioRef = useRef<HTMLAudioElement>(new Audio());
   const playSessionRef = useRef(0);
   const recognitionRef = useRef<any>(null);
   const textScrollRef = useRef<HTMLDivElement>(null);
@@ -1490,11 +1486,9 @@ const saveToPhotosOrDownload = async () => {
   const stopEverything = () => {
     setIsPlaying(false);
     isPlayingRef.current = false;
-    if (currentSourceRef.current) {
-      currentSourceRef.current.onended = null;
-      try { currentSourceRef.current.stop(); } catch (e) {}
-      currentSourceRef.current = null;
-    }
+    const audio = readerAudioRef.current;
+    audio.onended = null;
+    audio.pause();
     if (recognitionRef.current) {
       recognitionRef.current.onend = null;
       recognitionRef.current.stop();
@@ -1526,11 +1520,20 @@ const saveToPhotosOrDownload = async () => {
   };
 
   const unlockAudio = () => {
-    if (audioCtxRef.current) return;
-    const AudioContext = (window as any).AudioContext || (window as any).webkitAudioContext;
-    if (!AudioContext) return;
-    audioCtxRef.current = new AudioContext();
-    audioCtxRef.current.resume().catch(() => {});
+    if (!audioCtxRef.current) {
+      const AudioContext = (window as any).AudioContext || (window as any).webkitAudioContext;
+      if (AudioContext) {
+        audioCtxRef.current = new AudioContext();
+        audioCtxRef.current.resume().catch(() => {});
+      }
+    }
+    // Prime the <audio> element so iOS allows future programmatic play() calls
+    const audio = readerAudioRef.current;
+    if (!audio.dataset.unlocked) {
+      audio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+      audio.play().catch(() => {}).finally(() => { audio.src = ''; });
+      audio.dataset.unlocked = '1';
+    }
   };
 
   const playReader = (index: number) => {
@@ -1539,16 +1542,14 @@ const saveToPhotosOrDownload = async () => {
       recognitionRef.current.stop();
     }
 
-    if (currentSourceRef.current) {
-      currentSourceRef.current.onended = null;
-      try { currentSourceRef.current.stop(); } catch (e) {}
-      currentSourceRef.current = null;
-    }
-
     const session = ++playSessionRef.current;
     const line = linesRef.current[index];
 
-    if (!line.audioPath || !audioCtxRef.current) {
+    const audio = readerAudioRef.current;
+    audio.onended = null;
+    audio.pause();
+
+    if (!line.audioPath) {
       setTimeout(() => {
         if (currentIndexRef.current === index && isPlayingRef.current) {
           stepTo(index + 1);
@@ -1557,31 +1558,17 @@ const saveToPhotosOrDownload = async () => {
       return;
     }
 
-    const ctx = audioCtxRef.current;
-    fetch(line.audioPath)
-      .then(r => r.arrayBuffer())
-      .then(ab => {
-        if (playSessionRef.current !== session) return null;
-        return ctx.decodeAudioData(ab);
-      })
-      .then(audioBuffer => {
-        if (!audioBuffer || playSessionRef.current !== session || !isPlayingRef.current) return;
-        const source = ctx.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(ctx.destination);
-        currentSourceRef.current = source;
-        source.onended = () => {
-          if (currentIndexRef.current === index && isPlayingRef.current) {
-            stepTo(index + 1);
-          }
-        };
-        source.start();
-      })
-      .catch(() => {
-        if (currentIndexRef.current === index && isPlayingRef.current) {
-          setTimeout(() => stepTo(index + 1), 600);
-        }
-      });
+    audio.src = line.audioPath;
+    audio.onended = () => {
+      if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
+        stepTo(index + 1);
+      }
+    };
+    audio.play().catch(() => {
+      if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
+        setTimeout(() => stepTo(index + 1), 600);
+      }
+    });
   };
 
   const startListening = (index: number) => {
@@ -1607,32 +1594,35 @@ const saveToPhotosOrDownload = async () => {
       if (!isPlayingRef.current) return;
       if (currentIndexRef.current !== index) return;
 
-      let latestInterim = "";
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const t = normalize(event.results[i][0].transcript);
-        if (event.results[i].isFinal) {
-          spokenFinalRef.current = (spokenFinalRef.current + " " + t).trim();
-        } else {
-          latestInterim = t;
-        }
-      }
-
       const lineData = linesRef.current[index];
       const cue = normalize(lineData.cueWord || "") ||
                   normalize(lineData.text || "").split(/\s+/).filter(Boolean).slice(-1)[0] || "";
+      if (!cue) return;
 
-      if (cue) {
-        const fullSpoken = (spokenFinalRef.current + " " + latestInterim).trim();
-        const lastWordsList = fullSpoken.split(/\s+/).filter(Boolean).slice(-8);
-        if (lastWordsList.includes(cue)) {
-          const now = Date.now();
-          if (!hasTriggeredRef.current && now - lastTriggerAtRef.current > 650) {
-            hasTriggeredRef.current = true;
-            lastTriggerAtRef.current = now;
-            recognition.onend = null;
-            recognition.stop();
-            stepTo(index + 1);
+      let latestInterim = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        if (result.isFinal) {
+          const t = normalize(result[0].transcript);
+          spokenFinalRef.current = (spokenFinalRef.current + " " + t).trim();
+        } else {
+          for (let alt = 0; alt < result.length; alt++) {
+            latestInterim += " " + normalize(result[alt].transcript);
           }
+          latestInterim = latestInterim.trim();
+        }
+      }
+
+      const fullSpoken = (spokenFinalRef.current + " " + latestInterim).trim();
+      const lastWordsList = fullSpoken.split(/\s+/).filter(Boolean).slice(-12);
+      if (lastWordsList.includes(cue)) {
+        const now = Date.now();
+        if (!hasTriggeredRef.current && now - lastTriggerAtRef.current > 650) {
+          hasTriggeredRef.current = true;
+          lastTriggerAtRef.current = now;
+          recognition.onend = null;
+          recognition.stop();
+          stepTo(index + 1);
         }
       }
     };
