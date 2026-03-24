@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run:*)",
+      "Skill(update-config)",
+      "Skill(update-config:*)"
+    ]
+  }
+}
