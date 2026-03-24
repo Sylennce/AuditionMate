@@ -1670,12 +1670,29 @@ const saveToPhotosOrDownload = async () => {
     mediaRecorder.current = new MediaRecorder(stream);
     videoChunks.current = [];
     mediaRecorder.current.ondataavailable = (e) => videoChunks.current.push(e.data);
-    mediaRecorder.current.onstop = () => {
-  const blob = new Blob(videoChunks.current, { type: 'video/mp4' });
-  const url = URL.createObjectURL(blob);
-  setTapeBlob(blob);
-  setTapeUrl(url);
-};
+    mediaRecorder.current.onstop = async () => {
+      const blob = new Blob(videoChunks.current, { type: 'video/mp4' });
+      const url = URL.createObjectURL(blob);
+      setTapeBlob(blob);
+      setTapeUrl(url);
+
+      // Auto-trigger the share sheet immediately — onstop fires within milliseconds
+      // of the stop button tap so the user activation is still valid on iOS.
+      const safeName = scene.title.replace(/[^\w\-]+/g, '_');
+      const file = new File([blob], `SelfTape-${safeName}.mp4`, { type: 'video/mp4' });
+      const navAny = navigator as any;
+      if (navAny.share && navAny.canShare?.({ files: [file] })) {
+        try {
+          await navAny.share({
+            files: [file],
+            title: `SelfTape - ${scene.title}`,
+            text: 'Save to Photos / Files',
+          });
+        } catch (_) {
+          // User dismissed or share failed — the save button below remains as fallback
+        }
+      }
+    };
     mediaRecorder.current.start();
     setIsRecording(true);
   };
