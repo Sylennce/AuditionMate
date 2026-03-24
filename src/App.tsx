@@ -1052,7 +1052,17 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
     };
     audio.play().catch(() => {
       if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
-        setTimeout(() => stepTo(index + 1), 600);
+        // iOS may need time to exit voice-processing mode after SpeechRecognition stops.
+        // Retry once after 400ms before giving up and skipping.
+        setTimeout(() => {
+          if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
+            audio.play().catch(() => {
+              if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
+                setTimeout(() => stepTo(index + 1), 600);
+              }
+            });
+          }
+        }, 400);
       }
     });
   };
@@ -1193,9 +1203,6 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
       }
       if (countdownTimerRef.current) {
         clearInterval(countdownTimerRef.current);
-      }
-      if (currentSourceRef.current) {
-        try { currentSourceRef.current.stop(); } catch (e) {}
       }
     };
   }, []);
@@ -1540,7 +1547,17 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
     };
     audio.play().catch(() => {
       if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
-        setTimeout(() => stepTo(index + 1), 600);
+        // Retry once after 400ms — iOS may need time to exit voice-processing mode
+        // after SpeechRecognition stops or after a MediaRecorder audio session event.
+        setTimeout(() => {
+          if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
+            audio.play().catch(() => {
+              if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
+                setTimeout(() => stepTo(index + 1), 600);
+              }
+            });
+          }
+        }, 400);
       }
     });
   };
@@ -1680,10 +1697,17 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
   };
 
   const stopTape = () => {
-    intentionalStopRef.current = true;
-    mediaRecorder.current?.stop();
     setIsRecording(false);
     stopEverything();
+    if (mediaRecorder.current?.state === 'recording') {
+      // Recorder is active — let onstop handle share sheet + onBack()
+      intentionalStopRef.current = true;
+      mediaRecorder.current.stop();
+    } else {
+      // Recorder already stopped unexpectedly (iOS audio session conflict).
+      // onstop won't fire, so navigate back directly without showing the share sheet.
+      onBack();
+    }
   };
 
   return (
