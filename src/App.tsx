@@ -1412,8 +1412,7 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
   const consecutiveMatchesRef = useRef(0);
   const lastTriggerAtRef = useRef(0);
 
-const [tapeBlob, setTapeBlob] = useState<Blob | null>(null);
-const [tapeUrl, setTapeUrl] = useState<string | null>(null);
+  const intentionalStopRef = useRef(false);
 
   useEffect(() => {
     linesRef.current = lines;
@@ -1449,31 +1448,6 @@ const [tapeUrl, setTapeUrl] = useState<string | null>(null);
     };
   }, []);
 
-const saveToPhotosOrDownload = async () => {
-  if (!tapeBlob) return;
-
-  const safeName = scene.title.replace(/[^\w\-]+/g, '_');
-  const file = new File([tapeBlob], `SelfTape-${safeName}.mp4`, { type: 'video/mp4' });
-
-  // Best case: native share sheet (iOS/Android)
-  // Note: requires user tap (this function should be called by a button click)
-  const navAny = navigator as any;
-  if (navAny.share && navAny.canShare?.({ files: [file] })) {
-    await navAny.share({
-      files: [file],
-      title: `SelfTape - ${scene.title}`,
-      text: 'Save to Photos / Files',
-    });
-    return;
-  }
-
-  // Fallback: download
-  const url = tapeUrl || URL.createObjectURL(tapeBlob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = file.name;
-  a.click();
-};
 
   const normalize = (text: string) => {
     return text
@@ -1671,13 +1645,12 @@ const saveToPhotosOrDownload = async () => {
     videoChunks.current = [];
     mediaRecorder.current.ondataavailable = (e) => videoChunks.current.push(e.data);
     mediaRecorder.current.onstop = async () => {
-      const blob = new Blob(videoChunks.current, { type: 'video/mp4' });
-      const url = URL.createObjectURL(blob);
-      setTapeBlob(blob);
-      setTapeUrl(url);
+      // If the MediaRecorder stopped unexpectedly (e.g. iOS audio session conflict
+      // when SpeechRecognition activates), ignore — don't share and don't navigate.
+      if (!intentionalStopRef.current) return;
+      intentionalStopRef.current = false;
 
-      // Auto-trigger the share sheet immediately — onstop fires within milliseconds
-      // of the stop button tap so the user activation is still valid on iOS.
+      const blob = new Blob(videoChunks.current, { type: 'video/mp4' });
       const safeName = scene.title.replace(/[^\w\-]+/g, '_');
       const file = new File([blob], `SelfTape-${safeName}.mp4`, { type: 'video/mp4' });
       const navAny = navigator as any;
@@ -1689,15 +1662,25 @@ const saveToPhotosOrDownload = async () => {
             text: 'Save to Photos / Files',
           });
         } catch (_) {
-          // User dismissed or share failed — the save button below remains as fallback
+          // User dismissed — still navigate back
         }
+      } else {
+        // Fallback: trigger download
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = file.name;
+        a.click();
       }
+
+      onBack();
     };
     mediaRecorder.current.start();
     setIsRecording(true);
   };
 
   const stopTape = () => {
+    intentionalStopRef.current = true;
     mediaRecorder.current?.stop();
     setIsRecording(false);
     stopEverything();
@@ -1760,23 +1743,12 @@ const saveToPhotosOrDownload = async () => {
             <div className="w-8 h-8 bg-white rounded-full" />
           </button>
         ) : (
-          <>
-  <button
+          <button
     onClick={stopTape}
     className="w-20 h-20 rounded-full bg-red-700 flex items-center justify-center shadow-xl active:scale-95 transition"
   >
     <div className="w-6 h-6 bg-white" />
   </button>
-
-  {tapeBlob && (
-    <button
-      onClick={saveToPhotosOrDownload}
-      className="mt-3 w-56 py-3 rounded-2xl bg-emerald-600 text-white font-bold uppercase tracking-widest text-xs"
-    >
-      Save to Photos / Share
-    </button>
-  )}
-</>
         )}
       </div>
 
