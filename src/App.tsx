@@ -392,7 +392,7 @@ function HomeView({ scenes, onOpen, onCreate, onDelete, loading, error, onRetry 
         )}
       </div>
 
-      <p className="text-center text-zinc-700 text-[10px] font-mono mt-8">v1.3</p>
+      <p className="text-center text-zinc-700 text-[10px] font-mono mt-8">v1.4</p>
     </motion.div>
   );
 }
@@ -1041,6 +1041,7 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
     }
 
     audio.src = line.audioPath;
+    audio.load(); // required when changing src — forces iOS to prepare the new source
 
     const doPlay = () => {
       if (playSessionRef.current !== session || currentIndexRef.current !== index || !isPlayingRef.current) return;
@@ -1064,7 +1065,6 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
 
     // Wait for SpeechRecognition.onend before playing — that event fires when iOS
     // actually releases the audio session, switching output back to the loudspeaker.
-    // A fixed delay is unreliable; waiting for onend is the correct signal.
     const rec = recognitionRef.current;
     if (rec) {
       let settled = false;
@@ -1077,7 +1077,9 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
       setTimeout(settle, 500); // fallback if onend never fires
       try { rec.stop(); } catch (_) {}
     } else {
-      doPlay();
+      // No recognition active — still give iOS a brief moment to initialise the
+      // audio pipeline after load() before calling play().
+      setTimeout(doPlay, 100);
     }
   };
 
@@ -1576,6 +1578,7 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
     }
 
     audio.src = line.audioPath;
+    audio.load(); // required when changing src — forces iOS to prepare the new source
 
     const doPlay = () => {
       if (playSessionRef.current !== session || currentIndexRef.current !== index || !isPlayingRef.current) return;
@@ -1611,7 +1614,7 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
       setTimeout(settle, 500); // fallback if onend never fires
       try { rec.stop(); } catch (_) {}
     } else {
-      doPlay();
+      setTimeout(doPlay, 100);
     }
   };
 
