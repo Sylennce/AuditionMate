@@ -392,7 +392,7 @@ function HomeView({ scenes, onOpen, onCreate, onDelete, loading, error, onRetry 
         )}
       </div>
 
-      <p className="text-center text-zinc-700 text-[10px] font-mono mt-8">v1.4</p>
+      <p className="text-center text-zinc-700 text-[10px] font-mono mt-8">v1.5</p>
     </motion.div>
   );
 }
@@ -973,7 +973,10 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
     const audio = readerAudioRef.current;
     if (!audio.dataset.unlocked) {
       audio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
-      audio.play().catch(() => {}).finally(() => { audio.src = ''; });
+      audio.play().catch(() => {});
+      // Do NOT clear audio.src here. Resetting to '' puts iOS into NETWORK_EMPTY
+      // state and the first reader-line play always fails. Leaving the element
+      // on the silent src keeps it in a loaded state so the first real play works.
       audio.dataset.unlocked = '1';
     }
   };
@@ -1555,7 +1558,10 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
     const audio = readerAudioRef.current;
     if (!audio.dataset.unlocked) {
       audio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
-      audio.play().catch(() => {}).finally(() => { audio.src = ''; });
+      audio.play().catch(() => {});
+      // Do NOT clear audio.src here. Resetting to '' puts iOS into NETWORK_EMPTY
+      // state and the first reader-line play always fails. Leaving the element
+      // on the silent src keeps it in a loaded state so the first real play works.
       audio.dataset.unlocked = '1';
     }
   };
