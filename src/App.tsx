@@ -1021,7 +1021,7 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
   const playReader = (index: number) => {
     if (recognitionRef.current) {
       recognitionRef.current.onend = null;
-      recognitionRef.current.stop();
+      try { recognitionRef.current.stop(); } catch (_) {}
     }
 
     const session = ++playSessionRef.current;
@@ -1042,18 +1042,18 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
       return;
     }
 
-    // Use <audio> element — correctly routes to speaker on iOS regardless of
-    // whether speech recognition has put the session into voice-processing mode.
     audio.src = line.audioPath;
     audio.onended = () => {
       if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
         stepTo(index + 1);
       }
     };
-    audio.play().catch(() => {
-      if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
-        // iOS may need time to exit voice-processing mode after SpeechRecognition stops.
-        // Retry once after 400ms before giving up and skipping.
+
+    // Delay play so iOS has time to release the SpeechRecognition audio session
+    // and switch the audio route back to the loudspeaker (not the earpiece).
+    setTimeout(() => {
+      if (playSessionRef.current !== session || currentIndexRef.current !== index || !isPlayingRef.current) return;
+      audio.play().catch(() => {
         setTimeout(() => {
           if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
             audio.play().catch(() => {
@@ -1063,8 +1063,8 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
             });
           }
         }, 400);
-      }
-    });
+      });
+    }, 350);
   };
 
   const startListening = (index: number) => {
@@ -1196,11 +1196,20 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
   };
 
   useEffect(() => {
-    return () => {
+    const releaseMedia = () => {
       if (recognitionRef.current) {
         recognitionRef.current.onend = null;
-        recognitionRef.current.stop();
+        try { recognitionRef.current.stop(); } catch (_) {}
       }
+      readerAudioRef.current.pause();
+    };
+    const onVisibility = () => { if (document.hidden) releaseMedia(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pagehide', releaseMedia);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', releaseMedia);
+      releaseMedia();
       if (countdownTimerRef.current) {
         clearInterval(countdownTimerRef.current);
       }
@@ -1406,6 +1415,7 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
   const playSessionRef = useRef(0);
   const recognitionRef = useRef<any>(null);
   const textScrollRef = useRef<HTMLDivElement>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
 
   const currentIndexRef = useRef(currentIndex);
   const isPlayingRef = useRef(isPlaying);
@@ -1437,9 +1447,20 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
   }, [isPlaying]);
 
   useEffect(() => {
+    const releaseMedia = () => {
+      cameraStreamRef.current?.getTracks().forEach(track => track.stop());
+      cameraStreamRef.current = null;
+      if (recognitionRef.current) {
+        recognitionRef.current.onend = null;
+        try { recognitionRef.current.stop(); } catch (_) {}
+      }
+      readerAudioRef.current.pause();
+    };
+
     async function setupCamera() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        cameraStreamRef.current = stream;
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
         }
@@ -1448,9 +1469,15 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
       }
     }
     setupCamera();
+
+    const onVisibility = () => { if (document.hidden) releaseMedia(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pagehide', releaseMedia);
+
     return () => {
-      const stream = videoRef.current?.srcObject as MediaStream;
-      stream?.getTracks().forEach(track => track.stop());
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', releaseMedia);
+      releaseMedia();
       stopEverything();
     };
   }, []);
@@ -1520,7 +1547,7 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
   const playReader = (index: number) => {
     if (recognitionRef.current) {
       recognitionRef.current.onend = null;
-      recognitionRef.current.stop();
+      try { recognitionRef.current.stop(); } catch (_) {}
     }
 
     const session = ++playSessionRef.current;
@@ -1545,10 +1572,12 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
         stepTo(index + 1);
       }
     };
-    audio.play().catch(() => {
-      if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
-        // Retry once after 400ms — iOS may need time to exit voice-processing mode
-        // after SpeechRecognition stops or after a MediaRecorder audio session event.
+
+    // Delay play so iOS has time to release the SpeechRecognition audio session
+    // and switch the audio route back to the loudspeaker (not the earpiece).
+    setTimeout(() => {
+      if (playSessionRef.current !== session || currentIndexRef.current !== index || !isPlayingRef.current) return;
+      audio.play().catch(() => {
         setTimeout(() => {
           if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
             audio.play().catch(() => {
@@ -1558,8 +1587,8 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
             });
           }
         }, 400);
-      }
-    });
+      });
+    }, 350);
   };
 
   const startListening = (index: number) => {
@@ -1657,7 +1686,7 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
   };
 
   const startRecording = () => {
-    const stream = videoRef.current?.srcObject as MediaStream;
+    const stream = cameraStreamRef.current as MediaStream;
     mediaRecorder.current = new MediaRecorder(stream);
     videoChunks.current = [];
     mediaRecorder.current.ondataavailable = (e) => videoChunks.current.push(e.data);
