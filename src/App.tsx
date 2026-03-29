@@ -532,12 +532,15 @@ function RecordView({ scene, onBack, lineCount, addToast }: { scene: Scene, onBa
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
       mediaRecorder.current = new MediaRecorder(stream);
+      // Capture the actual MIME type the browser chose (e.g. audio/mp4 on iOS, audio/webm elsewhere).
+      // Using the wrong type causes iOS Safari to fail to decode the blob on playback.
+      const recMimeType = mediaRecorder.current.mimeType || 'audio/mp4';
       audioChunks.current = [];
       startTime.current = Date.now();
 
       mediaRecorder.current.ondataavailable = (e) => audioChunks.current.push(e.data);
       mediaRecorder.current.onstop = async () => {
-        const blob = new Blob(audioChunks.current, { type: 'audio/wav' });
+        const blob = new Blob(audioChunks.current, { type: recMimeType });
         setRecordedBlob(blob);
         
         if (recognitionRef.current) {
@@ -1019,11 +1022,6 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
   };
 
   const playReader = (index: number) => {
-    if (recognitionRef.current) {
-      recognitionRef.current.onend = null;
-      try { recognitionRef.current.stop(); } catch (_) {}
-    }
-
     const session = ++playSessionRef.current;
     const line = linesRef.current[index];
 
@@ -1043,16 +1041,14 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
     }
 
     audio.src = line.audioPath;
-    audio.onended = () => {
-      if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
-        stepTo(index + 1);
-      }
-    };
 
-    // Delay play so iOS has time to release the SpeechRecognition audio session
-    // and switch the audio route back to the loudspeaker (not the earpiece).
-    setTimeout(() => {
+    const doPlay = () => {
       if (playSessionRef.current !== session || currentIndexRef.current !== index || !isPlayingRef.current) return;
+      audio.onended = () => {
+        if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
+          stepTo(index + 1);
+        }
+      };
       audio.play().catch(() => {
         setTimeout(() => {
           if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
@@ -1064,7 +1060,25 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
           }
         }, 400);
       });
-    }, 350);
+    };
+
+    // Wait for SpeechRecognition.onend before playing — that event fires when iOS
+    // actually releases the audio session, switching output back to the loudspeaker.
+    // A fixed delay is unreliable; waiting for onend is the correct signal.
+    const rec = recognitionRef.current;
+    if (rec) {
+      let settled = false;
+      const settle = () => {
+        if (settled) return;
+        settled = true;
+        setTimeout(doPlay, 150); // small buffer after onend for iOS to flip the audio route
+      };
+      rec.onend = settle;
+      setTimeout(settle, 500); // fallback if onend never fires
+      try { rec.stop(); } catch (_) {}
+    } else {
+      doPlay();
+    }
   };
 
   const startListening = (index: number) => {
@@ -1545,11 +1559,6 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
   };
 
   const playReader = (index: number) => {
-    if (recognitionRef.current) {
-      recognitionRef.current.onend = null;
-      try { recognitionRef.current.stop(); } catch (_) {}
-    }
-
     const session = ++playSessionRef.current;
     const line = linesRef.current[index];
 
@@ -1567,16 +1576,14 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
     }
 
     audio.src = line.audioPath;
-    audio.onended = () => {
-      if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
-        stepTo(index + 1);
-      }
-    };
 
-    // Delay play so iOS has time to release the SpeechRecognition audio session
-    // and switch the audio route back to the loudspeaker (not the earpiece).
-    setTimeout(() => {
+    const doPlay = () => {
       if (playSessionRef.current !== session || currentIndexRef.current !== index || !isPlayingRef.current) return;
+      audio.onended = () => {
+        if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
+          stepTo(index + 1);
+        }
+      };
       audio.play().catch(() => {
         setTimeout(() => {
           if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
@@ -1588,7 +1595,24 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
           }
         }, 400);
       });
-    }, 350);
+    };
+
+    // Wait for SpeechRecognition.onend before playing — that event fires when iOS
+    // actually releases the audio session, switching output back to the loudspeaker.
+    const rec = recognitionRef.current;
+    if (rec) {
+      let settled = false;
+      const settle = () => {
+        if (settled) return;
+        settled = true;
+        setTimeout(doPlay, 150);
+      };
+      rec.onend = settle;
+      setTimeout(settle, 500); // fallback if onend never fires
+      try { rec.stop(); } catch (_) {}
+    } else {
+      doPlay();
+    }
   };
 
   const startListening = (index: number) => {
