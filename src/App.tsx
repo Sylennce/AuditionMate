@@ -392,7 +392,7 @@ function HomeView({ scenes, onOpen, onCreate, onDelete, loading, error, onRetry 
         )}
       </div>
 
-      {/* Footer removed */}
+      <p className="text-center text-zinc-700 text-[10px] font-mono mt-8">v1.2</p>
     </motion.div>
   );
 }
