@@ -392,7 +392,7 @@ function HomeView({ scenes, onOpen, onCreate, onDelete, loading, error, onRetry 
         )}
       </div>
 
-      <p className="text-center text-zinc-700 text-[10px] font-mono mt-8">v1.5</p>
+      <p className="text-center text-zinc-700 text-[10px] font-mono mt-8">v1.6</p>
     </motion.div>
   );
 }
@@ -969,15 +969,26 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
         audioCtxRef.current.resume().catch(() => {});
       }
     }
-    // Prime the <audio> element so iOS allows future programmatic play() calls
+    // Prime the <audio> element with a blob: URL — NOT a data: URI.
+    // On iOS, the first transition from a data: URI to a blob: URL resets the
+    // element's "allowed to play" state, causing the first real play() to fail
+    // silently. Using a blob: URL here means all subsequent transitions are
+    // blob: → blob:, which preserves the unlock across src changes.
     const audio = readerAudioRef.current;
     if (!audio.dataset.unlocked) {
-      audio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+      const silentWav = new Uint8Array([
+        0x52,0x49,0x46,0x46,0x24,0x00,0x00,0x00,0x57,0x41,0x56,0x45,
+        0x66,0x6d,0x74,0x20,0x10,0x00,0x00,0x00,0x01,0x00,0x01,0x00,
+        0x44,0xac,0x00,0x00,0x88,0x58,0x01,0x00,0x02,0x00,0x10,0x00,
+        0x64,0x61,0x74,0x61,0x00,0x00,0x00,0x00,
+      ]);
+      const silentUrl = URL.createObjectURL(new Blob([silentWav], { type: 'audio/wav' }));
+      audio.src = silentUrl;
       audio.play().catch(() => {});
-      // Do NOT clear audio.src here. Resetting to '' puts iOS into NETWORK_EMPTY
-      // state and the first reader-line play always fails. Leaving the element
-      // on the silent src keeps it in a loaded state so the first real play works.
       audio.dataset.unlocked = '1';
+      // Revoke after the element has loaded — by the time playReader fires it will
+      // have already changed audio.src to the real line's blob URL.
+      setTimeout(() => URL.revokeObjectURL(silentUrl), 10000);
     }
   };
 
@@ -1080,9 +1091,23 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
       setTimeout(settle, 500); // fallback if onend never fires
       try { rec.stop(); } catch (_) {}
     } else {
-      // No recognition active — still give iOS a brief moment to initialise the
-      // audio pipeline after load() before calling play().
-      setTimeout(doPlay, 100);
+      // No recognition active — wait for the canplay event so we never call
+      // play() before iOS has the new blob URL ready. 500ms timeout as fallback.
+      let fired = false;
+      const onCanPlay = () => {
+        if (fired) return;
+        fired = true;
+        audio.removeEventListener('canplay', onCanPlay);
+        doPlay();
+      };
+      audio.addEventListener('canplay', onCanPlay);
+      setTimeout(() => {
+        if (!fired) {
+          fired = true;
+          audio.removeEventListener('canplay', onCanPlay);
+          doPlay();
+        }
+      }, 500);
     }
   };
 
@@ -1554,15 +1579,24 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
         audioCtxRef.current.resume().catch(() => {});
       }
     }
-    // Prime the <audio> element so iOS allows future programmatic play() calls
+    // Prime the <audio> element with a blob: URL — NOT a data: URI.
+    // On iOS, the first transition from a data: URI to a blob: URL resets the
+    // element's "allowed to play" state, causing the first real play() to fail
+    // silently. Using a blob: URL here means all subsequent transitions are
+    // blob: → blob:, which preserves the unlock across src changes.
     const audio = readerAudioRef.current;
     if (!audio.dataset.unlocked) {
-      audio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+      const silentWav = new Uint8Array([
+        0x52,0x49,0x46,0x46,0x24,0x00,0x00,0x00,0x57,0x41,0x56,0x45,
+        0x66,0x6d,0x74,0x20,0x10,0x00,0x00,0x00,0x01,0x00,0x01,0x00,
+        0x44,0xac,0x00,0x00,0x88,0x58,0x01,0x00,0x02,0x00,0x10,0x00,
+        0x64,0x61,0x74,0x61,0x00,0x00,0x00,0x00,
+      ]);
+      const silentUrl = URL.createObjectURL(new Blob([silentWav], { type: 'audio/wav' }));
+      audio.src = silentUrl;
       audio.play().catch(() => {});
-      // Do NOT clear audio.src here. Resetting to '' puts iOS into NETWORK_EMPTY
-      // state and the first reader-line play always fails. Leaving the element
-      // on the silent src keeps it in a loaded state so the first real play works.
       audio.dataset.unlocked = '1';
+      setTimeout(() => URL.revokeObjectURL(silentUrl), 10000);
     }
   };
 
@@ -1620,7 +1654,21 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
       setTimeout(settle, 500); // fallback if onend never fires
       try { rec.stop(); } catch (_) {}
     } else {
-      setTimeout(doPlay, 100);
+      let fired = false;
+      const onCanPlay = () => {
+        if (fired) return;
+        fired = true;
+        audio.removeEventListener('canplay', onCanPlay);
+        doPlay();
+      };
+      audio.addEventListener('canplay', onCanPlay);
+      setTimeout(() => {
+        if (!fired) {
+          fired = true;
+          audio.removeEventListener('canplay', onCanPlay);
+          doPlay();
+        }
+      }, 500);
     }
   };
 
