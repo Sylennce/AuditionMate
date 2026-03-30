@@ -1054,9 +1054,6 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
       return;
     }
 
-    audio.src = line.audioPath;
-    audio.load(); // required when changing src — forces iOS to prepare the new source
-
     const doPlay = () => {
       if (playSessionRef.current !== session || currentIndexRef.current !== index || !isPlayingRef.current) return;
       audio.onended = () => {
@@ -1077,37 +1074,57 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
       });
     };
 
-    // Wait for SpeechRecognition.onend before playing — that event fires when iOS
-    // actually releases the audio session, switching output back to the loudspeaker.
+    // Two-gate approach: doPlay fires only after BOTH conditions are met.
+    // Gate 1 — canplay: audio element has buffered the new blob and is ready.
+    // Gate 2 — recSettled: iOS has released the audio session from SpeechRecognition.
+    //
+    // IMPORTANT: do NOT call audio.load() here. On iOS, load() resets the
+    // element's unlock state acquired in unlockAudio(), causing play() to fail
+    // silently for every reader line except the last. Setting audio.src alone
+    // triggers automatic loading while preserving the unlock.
+    //
+    // Add the canplay listener BEFORE setting audio.src so we never miss the event.
+    let canPlayFired = false;
+    let recSettled = false;
+    const tryPlay = () => { if (canPlayFired && recSettled) doPlay(); };
+
+    let canPlayHandled = false;
+    const onCanPlay = () => {
+      if (canPlayHandled) return;
+      canPlayHandled = true;
+      audio.removeEventListener('canplay', onCanPlay);
+      canPlayFired = true;
+      tryPlay();
+    };
+    audio.addEventListener('canplay', onCanPlay);
+    setTimeout(() => {
+      if (!canPlayHandled) {
+        canPlayHandled = true;
+        audio.removeEventListener('canplay', onCanPlay);
+        canPlayFired = true;
+        tryPlay();
+      }
+    }, 500);
+
+    audio.src = line.audioPath;
+
     const rec = recognitionRef.current;
     if (rec) {
+      // Wait for SpeechRecognition.onend — fires when iOS releases the audio
+      // session, switching output back to the loudspeaker. 150ms buffer after
+      // onend for iOS to finish flipping the audio route. 500ms fallback if
+      // onend never fires (e.g. recognition was already stopped).
       let settled = false;
       const settle = () => {
         if (settled) return;
         settled = true;
-        setTimeout(doPlay, 150); // small buffer after onend for iOS to flip the audio route
+        setTimeout(() => { recSettled = true; tryPlay(); }, 150);
       };
       rec.onend = settle;
-      setTimeout(settle, 500); // fallback if onend never fires
+      setTimeout(settle, 500);
       try { rec.stop(); } catch (_) {}
     } else {
-      // No recognition active — wait for the canplay event so we never call
-      // play() before iOS has the new blob URL ready. 500ms timeout as fallback.
-      let fired = false;
-      const onCanPlay = () => {
-        if (fired) return;
-        fired = true;
-        audio.removeEventListener('canplay', onCanPlay);
-        doPlay();
-      };
-      audio.addEventListener('canplay', onCanPlay);
-      setTimeout(() => {
-        if (!fired) {
-          fired = true;
-          audio.removeEventListener('canplay', onCanPlay);
-          doPlay();
-        }
-      }, 500);
+      recSettled = true;
     }
   };
 
@@ -1617,9 +1634,6 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
       return;
     }
 
-    audio.src = line.audioPath;
-    audio.load(); // required when changing src — forces iOS to prepare the new source
-
     const doPlay = () => {
       if (playSessionRef.current !== session || currentIndexRef.current !== index || !isPlayingRef.current) return;
       audio.onended = () => {
@@ -1640,35 +1654,53 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
       });
     };
 
-    // Wait for SpeechRecognition.onend before playing — that event fires when iOS
-    // actually releases the audio session, switching output back to the loudspeaker.
+    // Two-gate approach: doPlay fires only after BOTH conditions are met.
+    // Gate 1 — canplay: audio element has buffered the new blob and is ready.
+    // Gate 2 — recSettled: iOS has released the audio session from SpeechRecognition.
+    //
+    // IMPORTANT: do NOT call audio.load() here. On iOS, load() resets the
+    // element's unlock state acquired in unlockAudio(), causing play() to fail
+    // silently for every reader line except the last. Setting audio.src alone
+    // triggers automatic loading while preserving the unlock.
+    //
+    // Add the canplay listener BEFORE setting audio.src so we never miss the event.
+    let canPlayFired = false;
+    let recSettled = false;
+    const tryPlay = () => { if (canPlayFired && recSettled) doPlay(); };
+
+    let canPlayHandled = false;
+    const onCanPlay = () => {
+      if (canPlayHandled) return;
+      canPlayHandled = true;
+      audio.removeEventListener('canplay', onCanPlay);
+      canPlayFired = true;
+      tryPlay();
+    };
+    audio.addEventListener('canplay', onCanPlay);
+    setTimeout(() => {
+      if (!canPlayHandled) {
+        canPlayHandled = true;
+        audio.removeEventListener('canplay', onCanPlay);
+        canPlayFired = true;
+        tryPlay();
+      }
+    }, 500);
+
+    audio.src = line.audioPath;
+
     const rec = recognitionRef.current;
     if (rec) {
       let settled = false;
       const settle = () => {
         if (settled) return;
         settled = true;
-        setTimeout(doPlay, 150);
+        setTimeout(() => { recSettled = true; tryPlay(); }, 150);
       };
       rec.onend = settle;
-      setTimeout(settle, 500); // fallback if onend never fires
+      setTimeout(settle, 500);
       try { rec.stop(); } catch (_) {}
     } else {
-      let fired = false;
-      const onCanPlay = () => {
-        if (fired) return;
-        fired = true;
-        audio.removeEventListener('canplay', onCanPlay);
-        doPlay();
-      };
-      audio.addEventListener('canplay', onCanPlay);
-      setTimeout(() => {
-        if (!fired) {
-          fired = true;
-          audio.removeEventListener('canplay', onCanPlay);
-          doPlay();
-        }
-      }, 500);
+      recSettled = true;
     }
   };
 
