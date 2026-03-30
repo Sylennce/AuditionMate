@@ -392,7 +392,7 @@ function HomeView({ scenes, onOpen, onCreate, onDelete, loading, error, onRetry 
         )}
       </div>
 
-      <p className="text-center text-zinc-700 text-[10px] font-mono mt-8">v1.6</p>
+      <p className="text-center text-zinc-700 text-[10px] font-mono mt-8">v1.7</p>
     </motion.div>
   );
 }
