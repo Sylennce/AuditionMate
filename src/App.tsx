@@ -392,7 +392,7 @@ function HomeView({ scenes, onOpen, onCreate, onDelete, loading, error, onRetry 
         )}
       </div>
 
-      <p className="text-center text-zinc-700 text-[10px] font-mono mt-8">v1.7</p>
+      <p className="text-center text-zinc-700 text-[10px] font-mono mt-8">v1.8</p>
     </motion.div>
   );
 }
@@ -976,22 +976,34 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
     // blob: → blob:, which preserves the unlock across src changes.
     const audio = readerAudioRef.current;
     if (!audio.dataset.unlocked) {
-      // 50ms of silence (2205 samples @ 44100 Hz, mono, 16-bit).
-      // Must be non-zero duration — a 0-sample WAV leaves the audio element in
-      // an edge-case iOS "ended" state that prevents the first reader line from
-      // loading when audio.src is reassigned without calling audio.load().
-      const silentWav = new Uint8Array(44 + 4410);
-      silentWav.set([
-        0x52,0x49,0x46,0x46, 0x5E,0x11,0x00,0x00, 0x57,0x41,0x56,0x45,
-        0x66,0x6d,0x74,0x20, 0x10,0x00,0x00,0x00, 0x01,0x00,0x01,0x00,
-        0x44,0xac,0x00,0x00, 0x88,0x58,0x01,0x00, 0x02,0x00,0x10,0x00,
-        0x64,0x61,0x74,0x61, 0x3A,0x11,0x00,0x00,
+      // 0-sample WAV — header only, no audio data. Fires 'ended' immediately,
+      // establishing the per-element iOS unlock without leaving a real "ended"
+      // play state behind. In the onended callback we immediately transition the
+      // element to the first reader line's src so that when playReader() fires
+      // it sees a "loading real content" state rather than a "0-sample ended"
+      // state — iOS requires the latter to be explicitly load()-ed, which resets
+      // the unlock. This pre-load avoids both pitfalls.
+      const silentWav = new Uint8Array([
+        0x52,0x49,0x46,0x46,0x24,0x00,0x00,0x00,0x57,0x41,0x56,0x45,
+        0x66,0x6d,0x74,0x20,0x10,0x00,0x00,0x00,0x01,0x00,0x01,0x00,
+        0x44,0xac,0x00,0x00,0x88,0x58,0x01,0x00,0x02,0x00,0x10,0x00,
+        0x64,0x61,0x74,0x61,0x00,0x00,0x00,0x00,
       ]);
       const silentUrl = URL.createObjectURL(new Blob([silentWav], { type: 'audio/wav' }));
+      audio.addEventListener('ended', function onUnlockEnded() {
+        audio.removeEventListener('ended', onUnlockEnded);
+        URL.revokeObjectURL(silentUrl);
+        // Move element out of "0-sample ended" state by pre-loading the first
+        // reader line. playReader() will re-assign the same src, triggering a
+        // fresh load cycle from a clean non-ended state.
+        const firstReader = linesRef.current.find(l => l.speakerRole === 'READER');
+        if (firstReader?.audioPath) {
+          audio.src = firstReader.audioPath;
+        }
+      });
       audio.src = silentUrl;
       audio.play().catch(() => {});
       audio.dataset.unlocked = '1';
-      setTimeout(() => URL.revokeObjectURL(silentUrl), 10000);
     }
   };
 
@@ -1606,18 +1618,24 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
     // blob: → blob:, which preserves the unlock across src changes.
     const audio = readerAudioRef.current;
     if (!audio.dataset.unlocked) {
-      const silentWav = new Uint8Array(44 + 4410);
-      silentWav.set([
-        0x52,0x49,0x46,0x46, 0x5E,0x11,0x00,0x00, 0x57,0x41,0x56,0x45,
-        0x66,0x6d,0x74,0x20, 0x10,0x00,0x00,0x00, 0x01,0x00,0x01,0x00,
-        0x44,0xac,0x00,0x00, 0x88,0x58,0x01,0x00, 0x02,0x00,0x10,0x00,
-        0x64,0x61,0x74,0x61, 0x3A,0x11,0x00,0x00,
+      const silentWav = new Uint8Array([
+        0x52,0x49,0x46,0x46,0x24,0x00,0x00,0x00,0x57,0x41,0x56,0x45,
+        0x66,0x6d,0x74,0x20,0x10,0x00,0x00,0x00,0x01,0x00,0x01,0x00,
+        0x44,0xac,0x00,0x00,0x88,0x58,0x01,0x00,0x02,0x00,0x10,0x00,
+        0x64,0x61,0x74,0x61,0x00,0x00,0x00,0x00,
       ]);
       const silentUrl = URL.createObjectURL(new Blob([silentWav], { type: 'audio/wav' }));
+      audio.addEventListener('ended', function onUnlockEnded() {
+        audio.removeEventListener('ended', onUnlockEnded);
+        URL.revokeObjectURL(silentUrl);
+        const firstReader = linesRef.current.find(l => l.speakerRole === 'READER');
+        if (firstReader?.audioPath) {
+          audio.src = firstReader.audioPath;
+        }
+      });
       audio.src = silentUrl;
       audio.play().catch(() => {});
       audio.dataset.unlocked = '1';
-      setTimeout(() => URL.revokeObjectURL(silentUrl), 10000);
     }
   };
 
