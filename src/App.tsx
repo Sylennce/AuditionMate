@@ -392,7 +392,7 @@ function HomeView({ scenes, onOpen, onCreate, onDelete, loading, error, onRetry 
         )}
       </div>
 
-      <p className="text-center text-zinc-700 text-[10px] font-mono mt-8">v1.8</p>
+      <p className="text-center text-zinc-700 text-[10px] font-mono mt-8">v1.9</p>
     </motion.div>
   );
 }
@@ -993,13 +993,20 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
       audio.addEventListener('ended', function onUnlockEnded() {
         audio.removeEventListener('ended', onUnlockEnded);
         URL.revokeObjectURL(silentUrl);
-        // Move element out of "0-sample ended" state by pre-loading the first
-        // reader line. playReader() will re-assign the same src, triggering a
-        // fresh load cycle from a clean non-ended state.
-        const firstReader = linesRef.current.find(l => l.speakerRole === 'READER');
-        if (firstReader?.audioPath) {
-          audio.src = firstReader.audioPath;
-        }
+        // Move element out of "0-sample ended" state using a 1-sample placeholder
+        // WAV that is distinct from any reader line's blob URL. This guarantees that
+        // when playReader() sets audio.src = line.audioPath, iOS always sees a URL
+        // change and fires canplay — including for the first reader line.
+        const placeholderWav = new Uint8Array([
+          0x52,0x49,0x46,0x46,0x26,0x00,0x00,0x00,0x57,0x41,0x56,0x45,
+          0x66,0x6d,0x74,0x20,0x10,0x00,0x00,0x00,0x01,0x00,0x01,0x00,
+          0x44,0xac,0x00,0x00,0x88,0x58,0x01,0x00,0x02,0x00,0x10,0x00,
+          0x64,0x61,0x74,0x61,0x02,0x00,0x00,0x00,0x00,0x00,
+        ]);
+        const placeholderUrl = URL.createObjectURL(new Blob([placeholderWav], { type: 'audio/wav' }));
+        audio.src = placeholderUrl;
+        // Revoke after a generous delay — the URL is abandoned when playReader sets the real src
+        setTimeout(() => URL.revokeObjectURL(placeholderUrl), 10000);
       });
       audio.src = silentUrl;
       audio.play().catch(() => {});
@@ -1080,9 +1087,15 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
         setTimeout(() => {
           if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
             audio.play().catch(() => {
-              if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
-                setTimeout(() => stepTo(index + 1), 600);
-              }
+              setTimeout(() => {
+                if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
+                  audio.play().catch(() => {
+                    if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
+                      setTimeout(() => stepTo(index + 1), 600);
+                    }
+                  });
+                }
+              }, 600);
             });
           }
         }, 400);
@@ -1628,10 +1641,15 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
       audio.addEventListener('ended', function onUnlockEnded() {
         audio.removeEventListener('ended', onUnlockEnded);
         URL.revokeObjectURL(silentUrl);
-        const firstReader = linesRef.current.find(l => l.speakerRole === 'READER');
-        if (firstReader?.audioPath) {
-          audio.src = firstReader.audioPath;
-        }
+        const placeholderWav = new Uint8Array([
+          0x52,0x49,0x46,0x46,0x26,0x00,0x00,0x00,0x57,0x41,0x56,0x45,
+          0x66,0x6d,0x74,0x20,0x10,0x00,0x00,0x00,0x01,0x00,0x01,0x00,
+          0x44,0xac,0x00,0x00,0x88,0x58,0x01,0x00,0x02,0x00,0x10,0x00,
+          0x64,0x61,0x74,0x61,0x02,0x00,0x00,0x00,0x00,0x00,
+        ]);
+        const placeholderUrl = URL.createObjectURL(new Blob([placeholderWav], { type: 'audio/wav' }));
+        audio.src = placeholderUrl;
+        setTimeout(() => URL.revokeObjectURL(placeholderUrl), 10000);
       });
       audio.src = silentUrl;
       audio.play().catch(() => {});
@@ -1667,9 +1685,15 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
         setTimeout(() => {
           if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
             audio.play().catch(() => {
-              if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
-                setTimeout(() => stepTo(index + 1), 600);
-              }
+              setTimeout(() => {
+                if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
+                  audio.play().catch(() => {
+                    if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
+                      setTimeout(() => stepTo(index + 1), 600);
+                    }
+                  });
+                }
+              }, 600);
             });
           }
         }, 400);
