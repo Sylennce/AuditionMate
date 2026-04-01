@@ -392,7 +392,7 @@ function HomeView({ scenes, onOpen, onCreate, onDelete, loading, error, onRetry 
         )}
       </div>
 
-      <p className="text-center text-zinc-700 text-[10px] font-mono mt-8">v1.9</p>
+      <p className="text-center text-zinc-700 text-[10px] font-mono mt-8">v1.10</p>
     </motion.div>
   );
 }
@@ -1005,6 +1005,11 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
         ]);
         const placeholderUrl = URL.createObjectURL(new Blob([placeholderWav], { type: 'audio/wav' }));
         audio.src = placeholderUrl;
+        // Explicitly load() the placeholder to teach iOS how to handle blob: URLs.
+        // This establishes reliable canplay behavior for subsequent src changes
+        // without resetting the unlock (load() only resets if called AFTER the
+        // unlock, not during it).
+        audio.load();
         // Revoke after a generous delay — the URL is abandoned when playReader sets the real src
         setTimeout(() => URL.revokeObjectURL(placeholderUrl), 10000);
       });
