@@ -98,13 +98,12 @@ function normalizeScene(scene: Scene): Scene {
 }
 
 function normalizeLine(rec: LineRecord): Line {
-  // Convert persisted blob to a playable URL each time we load
-  const audioPath = safeCreateObjectURL(rec.audioBlob);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { audioBlob, ...rest } = rec;
+  // Keep strong reference to blob to prevent GC. URL will be created
+  // just-in-time before playback to avoid timing-dependent validity issues.
   return {
-    ...rest,
-    audioPath,
+    ...rec,
+    audioPath: null, // Deprecated - will be created JIT in playback
+    audioBlob: rec.audioBlob || null,
   };
 }
 

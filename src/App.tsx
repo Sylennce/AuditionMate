@@ -392,7 +392,7 @@ function HomeView({ scenes, onOpen, onCreate, onDelete, loading, error, onRetry 
         )}
       </div>
 
-      <p className="text-center text-zinc-700 text-[10px] font-mono mt-8">v1.10</p>
+      <p className="text-center text-zinc-700 text-[10px] font-mono mt-8">v1.11</p>
     </motion.div>
   );
 }
@@ -1072,7 +1072,7 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
     audio.pause();
 
     // If no audio recorded for this line, skip forward after a short pause
-    if (!line.audioPath) {
+    if (!line.audioBlob) {
       setTimeout(() => {
         if (currentIndexRef.current === index && isPlayingRef.current) {
           stepTo(index + 1);
@@ -1081,10 +1081,17 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
       return;
     }
 
+    // Create blob URL just-in-time to prevent GC issues
+    const blobUrl = URL.createObjectURL(line.audioBlob);
+
     const doPlay = () => {
-      if (playSessionRef.current !== session || currentIndexRef.current !== index || !isPlayingRef.current) return;
+      if (playSessionRef.current !== session || currentIndexRef.current !== index || !isPlayingRef.current) {
+        URL.revokeObjectURL(blobUrl);
+        return;
+      }
       audio.onended = () => {
         if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
+          URL.revokeObjectURL(blobUrl);
           stepTo(index + 1);
         }
       };
@@ -1096,6 +1103,7 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
                 if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
                   audio.play().catch(() => {
                     if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
+                      URL.revokeObjectURL(blobUrl);
                       setTimeout(() => stepTo(index + 1), 600);
                     }
                   });
@@ -1139,7 +1147,7 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
       }
     }, 500);
 
-    audio.src = line.audioPath;
+    audio.src = blobUrl;
 
     const rec = recognitionRef.current;
     if (rec) {
@@ -1670,7 +1678,7 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
     audio.onended = null;
     audio.pause();
 
-    if (!line.audioPath) {
+    if (!line.audioBlob) {
       setTimeout(() => {
         if (currentIndexRef.current === index && isPlayingRef.current) {
           stepTo(index + 1);
@@ -1679,10 +1687,17 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
       return;
     }
 
+    // Create blob URL just-in-time to prevent GC issues
+    const blobUrl = URL.createObjectURL(line.audioBlob);
+
     const doPlay = () => {
-      if (playSessionRef.current !== session || currentIndexRef.current !== index || !isPlayingRef.current) return;
+      if (playSessionRef.current !== session || currentIndexRef.current !== index || !isPlayingRef.current) {
+        URL.revokeObjectURL(blobUrl);
+        return;
+      }
       audio.onended = () => {
         if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
+          URL.revokeObjectURL(blobUrl);
           stepTo(index + 1);
         }
       };
@@ -1694,6 +1709,7 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
                 if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
                   audio.play().catch(() => {
                     if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
+                      URL.revokeObjectURL(blobUrl);
                       setTimeout(() => stepTo(index + 1), 600);
                     }
                   });
@@ -1737,7 +1753,7 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
       }
     }, 500);
 
-    audio.src = line.audioPath;
+    audio.src = blobUrl;
 
     const rec = recognitionRef.current;
     if (rec) {

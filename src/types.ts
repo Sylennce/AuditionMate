@@ -12,6 +12,7 @@ export interface Line {
   text: string;
   cueWord: string;
   audioPath: string | null;
+  audioBlob?: Blob | null; // Keep strong reference to prevent GC
   durationMs: number;
   createdAt: string;
 }
