@@ -393,7 +393,7 @@ function HomeView({ scenes, onOpen, onCreate, onDelete, loading, error, onRetry 
         )}
       </div>
 
-      <p className="text-center text-zinc-700 text-[10px] font-mono mt-8">v1.13</p>
+      <p className="text-center text-zinc-700 text-[10px] font-mono mt-8">v1.14</p>
     </motion.div>
   );
 }
@@ -954,6 +954,7 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
   const isSpeechSupported = !!SpeechRecognition;
   const consecutiveMatchesRef = useRef(0);
   const lastTriggerAtRef = useRef(0);
+  const blobUrlsRef = useRef<string[]>([]);
 
   useEffect(() => {
     linesRef.current = lines;
@@ -1103,16 +1104,16 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
     }
 
     // Create blob URL just-in-time to prevent GC issues
+    // Store URL for cleanup on component unmount - don't revoke immediately
     const blobUrl = URL.createObjectURL(line.audioBlob);
+    blobUrlsRef.current.push(blobUrl);
 
     const doPlay = () => {
       if (playSessionRef.current !== session || currentIndexRef.current !== index || !isPlayingRef.current) {
-        URL.revokeObjectURL(blobUrl);
         return;
       }
       audio.onended = () => {
         if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
-          URL.revokeObjectURL(blobUrl);
           stepTo(index + 1);
         }
       };
@@ -1124,7 +1125,6 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
                 if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
                   audio.play().catch(() => {
                     if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
-                      URL.revokeObjectURL(blobUrl);
                       setTimeout(() => stepTo(index + 1), 600);
                     }
                   });
@@ -1325,6 +1325,9 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
         try { recognitionRef.current.stop(); } catch (_) {}
       }
       readerAudioRef.current.pause();
+      // Revoke all blob URLs created during this session
+      blobUrlsRef.current.forEach(url => URL.revokeObjectURL(url));
+      blobUrlsRef.current = [];
     };
     const onVisibility = () => { if (document.hidden) releaseMedia(); };
     document.addEventListener('visibilitychange', onVisibility);
@@ -1554,6 +1557,7 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
   const lastTriggerAtRef = useRef(0);
 
   const intentionalStopRef = useRef(false);
+  const blobUrlsRef = useRef<string[]>([]);
 
   useEffect(() => {
     linesRef.current = lines;
@@ -1579,19 +1583,17 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
         try { recognitionRef.current.stop(); } catch (_) {}
       }
       readerAudioRef.current.pause();
+      // Revoke all blob URLs created during this session
+      blobUrlsRef.current.forEach(url => URL.revokeObjectURL(url));
+      blobUrlsRef.current = [];
     };
 
     async function setupCamera(facing: 'user' | 'environment') {
       try {
-        // Request video with specific aspect ratio to match screen display
-        // 9:16 portrait or 16:9 landscape depending on orientation
+        // Let the camera use its natural aspect ratio - iOS doesn't handle
+        // forced constraints well and causes zoom/orientation issues
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: {
-            facingMode: facing,
-            aspectRatio: isLandscape ? 16/9 : 9/16,
-            width: { ideal: isLandscape ? 1920 : 1080 },
-            height: { ideal: isLandscape ? 1080 : 1920 }
-          },
+          video: { facingMode: facing },
           audio: true
         });
         cameraStreamRef.current = stream;
@@ -1614,7 +1616,7 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
       releaseMedia();
       stopEverything();
     };
-  }, [facingMode, isLandscape]);
+  }, [facingMode]);
 
 
   const normalize = (text: string) => {
@@ -1720,16 +1722,16 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
     }
 
     // Create blob URL just-in-time to prevent GC issues
+    // Store URL for cleanup on component unmount - don't revoke immediately
     const blobUrl = URL.createObjectURL(line.audioBlob);
+    blobUrlsRef.current.push(blobUrl);
 
     const doPlay = () => {
       if (playSessionRef.current !== session || currentIndexRef.current !== index || !isPlayingRef.current) {
-        URL.revokeObjectURL(blobUrl);
         return;
       }
       audio.onended = () => {
         if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
-          URL.revokeObjectURL(blobUrl);
           stepTo(index + 1);
         }
       };
@@ -1741,7 +1743,6 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
                 if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
                   audio.play().catch(() => {
                     if (playSessionRef.current === session && currentIndexRef.current === index && isPlayingRef.current) {
-                      URL.revokeObjectURL(blobUrl);
                       setTimeout(() => stepTo(index + 1), 600);
                     }
                   });
