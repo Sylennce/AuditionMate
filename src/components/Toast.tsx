@@ -23,7 +23,7 @@ export const Toast: React.FC<ToastProps> = ({ message, type, onClose }) => {
       initial={{ opacity: 0, y: 20, scale: 0.9 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: 20, scale: 0.9 }}
-      className={`fixed bottom-24 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-2 px-4 py-2.5 rounded-xl shadow-2xl border backdrop-blur-md ${
+      className={`fixed bottom-36 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-2 px-4 py-2.5 rounded-xl shadow-2xl border backdrop-blur-md ${
         type === 'success'
           ? 'bg-emerald-600/90 border-emerald-500 text-white'
           : type === 'error'

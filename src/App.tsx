@@ -392,7 +392,7 @@ function HomeView({ scenes, onOpen, onCreate, onDelete, loading, error, onRetry 
         )}
       </div>
 
-      <p className="text-center text-zinc-700 text-[10px] font-mono mt-8">v1.11</p>
+      <p className="text-center text-zinc-700 text-[10px] font-mono mt-8">v1.12</p>
     </motion.div>
   );
 }
@@ -506,6 +506,7 @@ function RecordView({ scene, onBack, lineCount, addToast }: { scene: Scene, onBa
   const [recordedBlob, setRecordedBlob] = useState<Blob | null>(null);
   const [transcription, setTranscription] = useState('');
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [linesRecordedThisSession, setLinesRecordedThisSession] = useState(0);
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const audioChunks = useRef<Blob[]>([]);
   const startTime = useRef<number>(0);
@@ -617,14 +618,14 @@ function RecordView({ scene, onBack, lineCount, addToast }: { scene: Scene, onBa
     setIsRecording(false);
   };
 
-  const handleSave = async () => {
+  const handleSave = async (shouldGoBack = false) => {
     if (!recordedBlob) return;
 
     try {
       const formData = new FormData();
       formData.append('id', crypto.randomUUID());
       formData.append('sceneId', scene.id);
-      formData.append('orderIndex', lineCount.toString());
+      formData.append('orderIndex', (lineCount + linesRecordedThisSession).toString());
       formData.append('speakerRole', role);
       formData.append('text', transcription);
       formData.append('cueWord', role === 'MYSELF' ? extractCueWord(transcription) : '');
@@ -633,7 +634,16 @@ function RecordView({ scene, onBack, lineCount, addToast }: { scene: Scene, onBa
 
       await api.createLine(formData);
       addToast('Line saved');
-      onBack();
+
+      if (shouldGoBack) {
+        onBack();
+      } else {
+        // Reset form for next line
+        setRecordedBlob(null);
+        setTranscription('');
+        finalTranscriptRef.current = '';
+        setLinesRecordedThisSession(prev => prev + 1);
+      }
     } catch (err) {
       addToast('Failed to save line.', 'error');
     }
@@ -707,23 +717,33 @@ function RecordView({ scene, onBack, lineCount, addToast }: { scene: Scene, onBa
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 mt-8">
-        <button 
-          onClick={() => {
-            setRecordedBlob(null);
-            setTranscription('');
-          }}
-          className="py-4 rounded-2xl bg-zinc-800 text-zinc-400 font-bold uppercase tracking-widest text-xs"
-        >
-          Reset
-        </button>
-        <button 
-          onClick={handleSave}
+      <div className="flex flex-col gap-3 mt-8">
+        <button
+          onClick={() => handleSave(false)}
           disabled={!recordedBlob || isTranscribing}
           className="py-4 rounded-2xl bg-emerald-600 text-white font-bold uppercase tracking-widest text-xs disabled:opacity-50"
         >
-          Save Line
+          Save & Record Another
         </button>
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            onClick={() => {
+              setRecordedBlob(null);
+              setTranscription('');
+              finalTranscriptRef.current = '';
+            }}
+            className="py-3 rounded-2xl bg-zinc-800 text-zinc-400 font-bold uppercase tracking-widest text-xs"
+          >
+            Reset
+          </button>
+          <button
+            onClick={() => handleSave(true)}
+            disabled={!recordedBlob || isTranscribing}
+            className="py-3 rounded-2xl bg-blue-600 text-white font-bold uppercase tracking-widest text-xs disabled:opacity-50"
+          >
+            Save & Done
+          </button>
+        </div>
       </div>
     </motion.div>
   );
@@ -1866,8 +1886,36 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
   };
 
   const startRecording = () => {
-    const stream = cameraStreamRef.current as MediaStream;
-    mediaRecorder.current = new MediaRecorder(stream);
+    const cameraStream = cameraStreamRef.current as MediaStream;
+
+    // Mix microphone audio with reader audio using Web Audio API
+    const AudioContext = (window as any).AudioContext || (window as any).webkitAudioContext;
+    const audioCtx = audioCtxRef.current || new AudioContext();
+    if (!audioCtxRef.current) audioCtxRef.current = audioCtx;
+
+    // Get the microphone audio track from camera stream
+    const micTrack = cameraStream.getAudioTracks()[0];
+    const micStream = new MediaStream([micTrack]);
+
+    // Create audio sources
+    const micSource = audioCtx.createMediaStreamSource(micStream);
+    const readerSource = audioCtx.createMediaElementSource(readerAudioRef.current);
+
+    // Create destination to mix both audio sources
+    const destination = audioCtx.createMediaStreamDestination();
+
+    // Connect both sources to the destination (this mixes them)
+    micSource.connect(destination);
+    readerSource.connect(destination);
+
+    // Also connect reader to speakers so user can hear it during recording
+    readerSource.connect(audioCtx.destination);
+
+    // Create combined stream: video from camera + mixed audio
+    const videoTrack = cameraStream.getVideoTracks()[0];
+    const mixedStream = new MediaStream([videoTrack, ...destination.stream.getAudioTracks()]);
+
+    mediaRecorder.current = new MediaRecorder(mixedStream);
     videoChunks.current = [];
     mediaRecorder.current.ondataavailable = (e) => videoChunks.current.push(e.data);
     mediaRecorder.current.onstop = async () => {
