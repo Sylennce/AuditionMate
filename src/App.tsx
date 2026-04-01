@@ -393,7 +393,7 @@ function HomeView({ scenes, onOpen, onCreate, onDelete, loading, error, onRetry 
         )}
       </div>
 
-      <p className="text-center text-zinc-700 text-[10px] font-mono mt-8">v1.16</p>
+      <p className="text-center text-zinc-700 text-[10px] font-mono mt-8">v1.17</p>
     </motion.div>
   );
 }
@@ -1088,10 +1088,9 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
     const session = ++playSessionRef.current;
     const line = linesRef.current[index];
 
-    // Stop any in-flight audio
-    const oldAudio = readerAudioRef.current;
-    oldAudio.onended = null;
-    oldAudio.pause();
+    const audio = readerAudioRef.current;
+    audio.onended = null;
+    audio.pause();
 
     // If no audio recorded for this line, skip forward after a short pause
     if (!line.audioBlob) {
@@ -1102,10 +1101,6 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
       }, 600);
       return;
     }
-
-    // Create FRESH Audio element for this line - eliminates state pollution
-    const audio = new Audio();
-    readerAudioRef.current = audio;
 
     // Create blob URL just-in-time to prevent GC issues
     // Store URL for cleanup on component unmount - don't revoke immediately
@@ -1546,6 +1541,9 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
   const recognitionRef = useRef<any>(null);
   const textScrollRef = useRef<HTMLDivElement>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const croppedStreamRef = useRef<MediaStream | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
 
   const currentIndexRef = useRef(currentIndex);
   const isPlayingRef = useRef(isPlaying);
@@ -1579,8 +1577,16 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
 
   useEffect(() => {
     const releaseMedia = () => {
+      // Stop animation frame loop
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+      // Stop camera and cropped streams
       cameraStreamRef.current?.getTracks().forEach(track => track.stop());
       cameraStreamRef.current = null;
+      croppedStreamRef.current?.getTracks().forEach(track => track.stop());
+      croppedStreamRef.current = null;
       if (recognitionRef.current) {
         recognitionRef.current.onend = null;
         try { recognitionRef.current.stop(); } catch (_) {}
@@ -1593,20 +1599,81 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
 
     async function setupCamera(facing: 'user' | 'environment') {
       try {
-        // Request 1080x1920 (9:16) for portrait - common iOS resolution
-        // Use 'exact' for height to force aspect ratio closer to screen
+        // Request highest resolution available - we'll crop to screen aspect ratio
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: facing,
-            width: { ideal: 1080 },
-            height: { ideal: 1920, min: 1280 }
+            width: { ideal: 1920 },
+            height: { ideal: 1920 }
           },
           audio: true
         });
         cameraStreamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
+
+        const video = videoRef.current;
+        const canvas = canvasRef.current;
+        if (!video || !canvas) return;
+
+        video.srcObject = stream;
+
+        // Wait for video metadata to load so we know the actual resolution
+        await new Promise<void>((resolve) => {
+          video.onloadedmetadata = () => resolve();
+        });
+
+        // Get actual video dimensions and screen dimensions
+        const videoWidth = video.videoWidth;
+        const videoHeight = video.videoHeight;
+        const screenWidth = window.innerWidth;
+        const screenHeight = window.innerHeight;
+        const screenAspect = screenWidth / screenHeight;
+
+        // Calculate crop dimensions to match screen aspect ratio
+        // We want to crop the CENTER of the video to match screen aspect
+        let cropWidth, cropHeight, cropX, cropY;
+
+        const videoAspect = videoWidth / videoHeight;
+
+        if (videoAspect > screenAspect) {
+          // Video is wider than screen - crop width
+          cropHeight = videoHeight;
+          cropWidth = videoHeight * screenAspect;
+          cropX = (videoWidth - cropWidth) / 2;
+          cropY = 0;
+        } else {
+          // Video is taller than screen - crop height
+          cropWidth = videoWidth;
+          cropHeight = videoWidth / screenAspect;
+          cropX = 0;
+          cropY = (videoHeight - cropHeight) / 2;
         }
+
+        // Set canvas to screen dimensions (this will be the output resolution)
+        canvas.width = screenWidth;
+        canvas.height = screenHeight;
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        // Draw cropped video to canvas at screen refresh rate
+        const drawFrame = () => {
+          ctx.drawImage(
+            video,
+            cropX, cropY, cropWidth, cropHeight,  // Source crop
+            0, 0, canvas.width, canvas.height      // Destination (full canvas)
+          );
+          animationFrameRef.current = requestAnimationFrame(drawFrame);
+        };
+        drawFrame();
+
+        // Capture canvas stream at 30fps - this is what MediaRecorder will record
+        const canvasStream = canvas.captureStream(30);
+
+        // Combine canvas video with microphone audio
+        const audioTrack = stream.getAudioTracks()[0];
+        const croppedStream = new MediaStream([...canvasStream.getVideoTracks(), audioTrack]);
+        croppedStreamRef.current = croppedStream;
+
       } catch (err) {
         console.error("Camera access denied", err);
       }
@@ -1907,6 +1974,7 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
 
   const startRecording = () => {
     const cameraStream = cameraStreamRef.current as MediaStream;
+    const croppedStream = croppedStreamRef.current as MediaStream;
 
     // Mix microphone audio with reader audio using Web Audio API
     const AudioContext = (window as any).AudioContext || (window as any).webkitAudioContext;
@@ -1931,8 +1999,8 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
     // Also connect reader to speakers so user can hear it during recording
     readerSource.connect(audioCtx.destination);
 
-    // Create combined stream: video from camera + mixed audio
-    const videoTrack = cameraStream.getVideoTracks()[0];
+    // Create combined stream: cropped video + mixed audio
+    const videoTrack = croppedStream.getVideoTracks()[0];
     const mixedStream = new MediaStream([videoTrack, ...destination.stream.getAudioTracks()]);
 
     mediaRecorder.current = new MediaRecorder(mixedStream);
@@ -1995,13 +2063,17 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
       className="h-full w-full bg-black flex flex-col overflow-hidden"
     >
       <video
-        ref={videoRef} 
-        autoPlay 
-        muted 
-        playsInline 
+        ref={videoRef}
+        autoPlay
+        muted
+        playsInline
         className="absolute inset-0 w-full h-full object-cover"
       />
-      
+      <canvas
+        ref={canvasRef}
+        className="hidden"
+      />
+
       <div className="absolute inset-x-0 top-0 h-2/3 bg-gradient-to-b from-black/80 via-black/40 to-transparent pointer-events-none z-0" />
 
       <header className={`relative p-6 flex items-center justify-between z-10 ${isLandscape ? 'py-3' : ''}`}>
