@@ -393,7 +393,7 @@ function HomeView({ scenes, onOpen, onCreate, onDelete, loading, error, onRetry 
         )}
       </div>
 
-      <p className="text-center text-zinc-700 text-[10px] font-mono mt-8">v1.15</p>
+      <p className="text-center text-zinc-700 text-[10px] font-mono mt-8">v1.16</p>
     </motion.div>
   );
 }
@@ -1089,9 +1089,9 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
     const line = linesRef.current[index];
 
     // Stop any in-flight audio
-    const audio = readerAudioRef.current;
-    audio.onended = null;
-    audio.pause();
+    const oldAudio = readerAudioRef.current;
+    oldAudio.onended = null;
+    oldAudio.pause();
 
     // If no audio recorded for this line, skip forward after a short pause
     if (!line.audioBlob) {
@@ -1102,6 +1102,10 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
       }, 600);
       return;
     }
+
+    // Create FRESH Audio element for this line - eliminates state pollution
+    const audio = new Audio();
+    readerAudioRef.current = audio;
 
     // Create blob URL just-in-time to prevent GC issues
     // Store URL for cleanup on component unmount - don't revoke immediately
@@ -1589,10 +1593,14 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
 
     async function setupCamera(facing: 'user' | 'environment') {
       try {
-        // Let the camera use its natural aspect ratio - iOS doesn't handle
-        // forced constraints well and causes zoom/orientation issues
+        // Request 1080x1920 (9:16) for portrait - common iOS resolution
+        // Use 'exact' for height to force aspect ratio closer to screen
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: facing },
+          video: {
+            facingMode: facing,
+            width: { ideal: 1080 },
+            height: { ideal: 1920, min: 1280 }
+          },
           audio: true
         });
         cameraStreamRef.current = stream;
