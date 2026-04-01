@@ -4,19 +4,20 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Plus, 
-  Mic, 
-  Play, 
-  ChevronRight, 
-  Trash2, 
-  Video, 
-  Type, 
+import {
+  Plus,
+  Mic,
+  Play,
+  ChevronRight,
+  Trash2,
+  Video,
+  Type,
   ArrowLeft,
   Pause,
   Volume2,
   Maximize2,
-  Settings
+  Settings,
+  SwitchCamera
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Scene, Line, TeleprompterSettings } from './types';
@@ -392,7 +393,7 @@ function HomeView({ scenes, onOpen, onCreate, onDelete, loading, error, onRetry 
         )}
       </div>
 
-      <p className="text-center text-zinc-700 text-[10px] font-mono mt-8">v1.12</p>
+      <p className="text-center text-zinc-700 text-[10px] font-mono mt-8">v1.13</p>
     </motion.div>
   );
 }
@@ -1528,6 +1529,7 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
   const [isPlaying, setIsPlaying] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [countdown, setCountdown] = useState(0);
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaRecorder = useRef<MediaRecorder | null>(null);
   const videoChunks = useRef<Blob[]>([]);
@@ -1579,9 +1581,19 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
       readerAudioRef.current.pause();
     };
 
-    async function setupCamera() {
+    async function setupCamera(facing: 'user' | 'environment') {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        // Request video with specific aspect ratio to match screen display
+        // 9:16 portrait or 16:9 landscape depending on orientation
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: facing,
+            aspectRatio: isLandscape ? 16/9 : 9/16,
+            width: { ideal: isLandscape ? 1920 : 1080 },
+            height: { ideal: isLandscape ? 1080 : 1920 }
+          },
+          audio: true
+        });
         cameraStreamRef.current = stream;
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
@@ -1590,7 +1602,7 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
         console.error("Camera access denied", err);
       }
     }
-    setupCamera();
+    setupCamera(facingMode);
 
     const onVisibility = () => { if (document.hidden) releaseMedia(); };
     document.addEventListener('visibilitychange', onVisibility);
@@ -1602,7 +1614,7 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
       releaseMedia();
       stopEverything();
     };
-  }, []);
+  }, [facingMode, isLandscape]);
 
 
   const normalize = (text: string) => {
@@ -1989,7 +2001,13 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
         <div className="px-3 py-1 bg-red-600 rounded-full text-[10px] font-bold uppercase tracking-widest animate-pulse">
           {isRecording ? 'Recording' : 'Standby'}
         </div>
-        <div className="w-10" />
+        <button
+          onClick={() => setFacingMode(prev => prev === 'user' ? 'environment' : 'user')}
+          disabled={isRecording || isPlaying}
+          className="p-2 bg-black/50 rounded-full text-white disabled:opacity-50"
+        >
+          <SwitchCamera size={24} />
+        </button>
       </header>
 
       <div className={`flex-1 flex flex-col items-center justify-center relative z-10 px-5 ${isLandscape ? 'py-4 pb-32' : 'py-8 pb-52'}`}>
@@ -2043,14 +2061,6 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
           <div className={`rounded-full transition-all ${isRecording ? 'w-8 h-8 bg-white' : 'w-16 h-16 bg-red-600'}`} />
         </button>
       </footer>
-
-      {/iPhone|iPad|iPod/.test(navigator.userAgent) && (
-        <div className="absolute bottom-4 left-0 right-0 px-4 z-20 pointer-events-none">
-          <div className="bg-amber-500/90 text-black text-[10px] font-bold uppercase tracking-widest py-1 px-3 rounded-full text-center max-w-xs mx-auto">
-            Voice cue may be limited while recording on iOS.
-          </div>
-        </div>
-      )}
     </motion.div>
   );
 }
