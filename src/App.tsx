@@ -393,7 +393,7 @@ function HomeView({ scenes, onOpen, onCreate, onDelete, loading, error, onRetry 
         )}
       </div>
 
-      <p className="text-center text-zinc-700 text-[10px] font-mono mt-8">v1.14</p>
+      <p className="text-center text-zinc-700 text-[10px] font-mono mt-8">v1.15</p>
     </motion.div>
   );
 }
@@ -1173,17 +1173,16 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
     const rec = recognitionRef.current;
     if (rec) {
       // Wait for SpeechRecognition.onend — fires when iOS releases the audio
-      // session, switching output back to the loudspeaker. 150ms buffer after
-      // onend for iOS to finish flipping the audio route. 500ms fallback if
-      // onend never fires (e.g. recognition was already stopped).
+      // session, switching output back to the loudspeaker. Generous delay after
+      // onend for iOS to fully settle audio session (early reader lines need more time).
       let settled = false;
       const settle = () => {
         if (settled) return;
         settled = true;
-        setTimeout(() => { recSettled = true; tryPlay(); }, 150);
+        setTimeout(() => { recSettled = true; tryPlay(); }, 800);
       };
       rec.onend = settle;
-      setTimeout(settle, 500);
+      setTimeout(settle, 1500);
       try { rec.stop(); } catch (_) {}
     } else {
       recSettled = true;
