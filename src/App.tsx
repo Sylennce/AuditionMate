@@ -393,7 +393,7 @@ function HomeView({ scenes, onOpen, onCreate, onDelete, loading, error, onRetry 
         )}
       </div>
 
-      <p className="text-center text-zinc-700 text-[10px] font-mono mt-8">v1.17</p>
+      <p className="text-center text-zinc-700 text-[10px] font-mono mt-8">v1.18</p>
     </motion.div>
   );
 }
@@ -1167,6 +1167,11 @@ function RehearseView({ scene, lines, onBack, rehearseFontPx, onOpenSettings, sc
       }
     }, 500);
 
+    // CRITICAL iOS FIX: Clear src before setting new blob URL to force iOS to
+    // recognize it as a fresh load and reliably fire canplay. Without this,
+    // iOS keeps the element in the previous URL's state, causing canplay to
+    // never fire for subsequent reader lines (only timeout fallback works).
+    audio.src = '';
     audio.src = blobUrl;
 
     const rec = recognitionRef.current;
@@ -1860,6 +1865,11 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
       }
     }, 500);
 
+    // CRITICAL iOS FIX: Clear src before setting new blob URL to force iOS to
+    // recognize it as a fresh load and reliably fire canplay. Without this,
+    // iOS keeps the element in the previous URL's state, causing canplay to
+    // never fire for subsequent reader lines (only timeout fallback works).
+    audio.src = '';
     audio.src = blobUrl;
 
     const rec = recognitionRef.current;
@@ -2067,11 +2077,11 @@ function SelfTapeView({ scene, lines, onBack, rehearseFontPx, scrollSpeed, isLan
         autoPlay
         muted
         playsInline
-        className="absolute inset-0 w-full h-full object-cover"
+        className="hidden"
       />
       <canvas
         ref={canvasRef}
-        className="hidden"
+        className="absolute inset-0 w-full h-full"
       />
 
       <div className="absolute inset-x-0 top-0 h-2/3 bg-gradient-to-b from-black/80 via-black/40 to-transparent pointer-events-none z-0" />
